@@ -157,6 +157,21 @@ cd cursor-context
 - 이 툴킷의 훅은 모든 경로에서 `exit 0`이므로 다른 훅이나 프롬프트 처리를
   차단하지 않습니다
 
+### 플랫폼 지원
+
+| 플랫폼 | 상태 |
+|---|---|
+| Linux | ✅ 지원 — 실제 Claude Code 세션에서 E2E 검증됨 |
+| macOS | ✅ 지원 — `shasum` 폴백 포함 (동작 경로 검증됨) |
+| Windows (WSL) | ✅ 지원 — 리눅스와 동일 |
+| Windows (네이티브) | ⚠️ 호환 설계, 실기기 미검증 |
+
+네이티브 Windows의 경우: Claude Code가 Git for Windows(Git Bash)를 필수로
+요구하므로 이 툴킷이 쓰는 bash·git·sha256sum·awk는 이미 설치되어 있습니다.
+훅 명령은 cmd 경유 실행에서도 변수 확장이 되도록 `bash -c` 래핑 형식을
+사용합니다. 다만 실제 Windows 기기에서의 검증은 아직 이루어지지 않았으므로
+문제가 있으면 이슈로 알려주세요. `install.sh`는 Git Bash에서 실행하면 됩니다.
+
 ### 수동 설치
 
 `.claude/` 디렉터리를 대상 프로젝트 루트에 복사하고

@@ -116,17 +116,19 @@ def registered(event, frag):
     return False
 
 changed = False
+# bash -c 래핑: 네이티브 Windows에서는 훅이 cmd 경유로 실행되어 .sh 직접
+# 실행과 $VAR 확장이 안 되므로, 변수 확장을 bash에게 맡기는 크로스 플랫폼 형식.
 if not registered("SessionStart", "session-context.sh"):
     h.setdefault("SessionStart", []).append({
         "matcher": "startup|clear|compact",
         "hooks": [{"type": "command",
-                   "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-context.sh",
+                   "command": 'bash -c "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/session-context.sh"',
                    "timeout": 15}]})
     changed = True
 if not registered("UserPromptSubmit", "prompt-freshness.sh"):
     h.setdefault("UserPromptSubmit", []).append({
         "hooks": [{"type": "command",
-                   "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/prompt-freshness.sh",
+                   "command": 'bash -c "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/prompt-freshness.sh"',
                    "timeout": 10}]})
     changed = True
 
