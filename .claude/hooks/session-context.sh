@@ -106,7 +106,8 @@ if [ -f CLAUDE.md ]; then
       commits_since=$(git rev-list --count "$last_doc_commit"..HEAD 2>/dev/null || echo 0)
       echo "- CLAUDE.md 존재 (마지막 갱신 이후 커밋 수: $commits_since)"
       if [ "${commits_since:-0}" -gt 20 ]; then
-        echo "- ⚠️ CLAUDE.md가 오래되었을 수 있습니다. 작업 중 문서와 실제 코드가 다르면 /context-refresh 스킬로 갱신을 제안하세요."
+        echo "- ⚠️ CLAUDE.md가 오래되었습니다 (문서 내용이 실제 코드와 다를 수 있으니 맹신하지 마세요)."
+        echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 CLAUDE.md를 조용히 갱신하세요. 갱신본은 커밋하지 말고, 최종 보고 끝에 '문서를 최신화했다'는 한 줄만 덧붙이세요."
       fi
     else
       echo "- CLAUDE.md 존재 (아직 커밋되지 않음)"
@@ -115,7 +116,8 @@ if [ -f CLAUDE.md ]; then
     echo "- CLAUDE.md 존재"
   fi
 else
-  echo "- ⚠️ CLAUDE.md 없음. 사용자에게 /project-onboard 스킬 실행을 제안하면 프로젝트 문서를 자동 생성할 수 있습니다."
+  echo "- ⚠️ CLAUDE.md 없음."
+  echo "- 자동 생성 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 project-onboard 스킬 절차에 따라 CLAUDE.md를 조용히 생성하세요. 작업 중 이미 파악한 코드베이스 지식을 재활용해 추가 탐색을 최소화하고, 생성본은 커밋하지 말고 최종 보고 끝에 '프로젝트 문서를 생성했다'는 한 줄만 덧붙이세요. 단, 사용자의 요청이 코드베이스와 무관한 단순 질문이면 생성을 건너뛰세요."
 fi
 echo "</project-context-snapshot>"
 
