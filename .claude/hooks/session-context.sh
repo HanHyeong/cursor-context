@@ -109,18 +109,31 @@ if [ -f CLAUDE.md ]; then
 fi
 
 if [ -f "$CTX_FILE" ]; then
-  # 신선도 검사: 파일 상단의 generated-at-commit 마커 기준
+  # 신선도 검사: 파일 상단의 generated-at-commit 마커 기준.
+  # 커서의 증분 인덱싱처럼 "변경의 성격"으로 판단한다:
+  #   1) 구조적 파일(매니페스트·CI·빌드 설정)이 바뀌면 커밋 수 무관 즉시 갱신
+  #   2) 그 외에는 20커밋 백스톱
+  #   3) 최신이어도 미세 갱신 규칙(발견한 불일치만 즉시 수정)은 항상 주입
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     gen_commit=$(sed -n 's/.*generated-at-commit: *\([0-9a-f]\{7,40\}\).*/\1/p' "$CTX_FILE" | head -1)
     if [ -n "$gen_commit" ] && git cat-file -e "$gen_commit" 2>/dev/null; then
       commits_since=$(git rev-list --count "$gen_commit"..HEAD 2>/dev/null || echo 0)
+      structural_changes=$(git diff --name-only "$gen_commit"..HEAD 2>/dev/null \
+        | grep -E '(^|/)(package\.json|pnpm-lock\.yaml|yarn\.lock|package-lock\.json|bun\.lockb?|pyproject\.toml|requirements[^/]*\.txt|go\.mod|Cargo\.toml|pom\.xml|build\.gradle(\.kts)?|Gemfile|composer\.json|Dockerfile|docker-compose[^/]*\.ya?ml|compose\.ya?ml|Makefile|tsconfig[^/]*\.json|\.github/workflows/)' \
+        | head -10)
       echo "- 자동 생성 문서 존재 (생성 시점 이후 커밋 수: $commits_since)"
-      if [ "${commits_since:-0}" -gt 20 ]; then
+      if [ -n "$structural_changes" ]; then
+        echo "- ⚠️ 생성 시점 이후 구조적 파일이 변경되었습니다 (문서의 명령어·스택 정보가 낡았을 수 있음):"
+        echo "$structural_changes" | sed 's/^/  - /'
+        echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 위 변경 파일과 관련된 섹션만 $CTX_FILE 에서 조용히 갱신하세요. CLAUDE.md는 건드리지 마세요. 최종 보고 끝에 '프로젝트 문서를 최신화했다'는 한 줄만 덧붙이세요."
+      elif [ "${commits_since:-0}" -gt 20 ]; then
         echo "- ⚠️ 자동 생성 문서가 오래되었습니다 (내용이 실제 코드와 다를 수 있으니 맹신하지 마세요)."
         echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 $CTX_FILE 을 조용히 갱신하세요. CLAUDE.md는 건드리지 마세요. 최종 보고 끝에 '프로젝트 문서를 최신화했다'는 한 줄만 덧붙이세요."
+      else
+        echo "- 미세 갱신 규칙: 이번 세션 작업 중 아래 문서와 실제 코드가 다른 부분을 발견하면, 작업 완료 후 사용자에게 묻지 말고 해당 부분만 조용히 고치고 generated-at-commit 마커를 현재 HEAD로 갱신하세요. 불일치를 발견하지 못했으면 아무것도 하지 마세요."
       fi
     else
-      echo "- 자동 생성 문서 존재 (신선도 마커 없음)"
+      echo "- 자동 생성 문서 존재 (신선도 마커 없음 — 다음 갱신 시 마커를 추가하세요)"
     fi
   fi
   echo ""
