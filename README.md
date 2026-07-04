@@ -1,140 +1,32 @@
 # cursor-context
 
-**Claude Code에서 커서(Cursor) IDE 수준의 자동 프로젝트 맥락 파악을 재현하는 툴킷**
+**Cursor-grade automatic project context awareness for Claude Code** — zero-touch, real-time, and honest about what it knows.
 
-커서 IDE는 별도 지시 없이도 프로젝트 맥락을 잘 파악합니다. 이는 (1) 코드베이스
-자동 인덱싱, (2) `.cursorrules` 기반 프로젝트 지침, (3) 열린 파일/최근 편집
-컨텍스트 자동 주입 덕분입니다. 이 툴킷은 Claude Code의 훅(hook)과 스킬(skill)로
-같은 효과를 만듭니다.
+> 한국어 문서: [README.ko.md](README.ko.md) · Status: **Beta** · License: MIT
 
-| 커서 IDE 기능 | 이 툴킷의 대응 |
+Cursor IDE understands your project without being told, thanks to background
+indexing, `.cursorrules`, and automatic context injection. This toolkit
+recreates that experience in Claude Code using hooks and skills — so Claude
+already knows your stack, structure, commands, and what your branch is working
+on *before* you type your first prompt.
+
+| Cursor feature | This toolkit's counterpart |
 |---|---|
-| 코드베이스 자동 인덱싱 (내부 산출물) | **`.claude/project-context.md`**: 자동 생성 컨텍스트 문서. 훅이 매 세션 주입 |
-| 머클 트리 기반 실시간 변경 감지 | **내용 지문(fingerprint) 비교**: 커밋·롤백·미커밋 변경 무관, 작업 트리 실제 내용 기준 |
-| 파일 저장 시 인덱스 자동 갱신 | **3단계 자동 갱신**: 불일치 발견 즉시 / 지문 불일치 즉시 / 20커밋 백스톱 |
-| `.cursorrules` (사용자가 쓰는 지침) | **CLAUDE.md**: 사용자 소유. 툴킷은 **절대 수정하지 않음** |
+| Background codebase index (internal artifact) | `.claude/project-context.md` — auto-generated doc, injected every session |
+| Merkle-tree change detection | Content fingerprints compared against the **live working tree** |
+| Index refresh on save | 3-tier auto-refresh: on noticed discrepancy / on structural change / 20-commit backstop |
+| `.cursorrules` (user-authored rules) | `CLAUDE.md` — **user-owned, never touched by the toolkit** |
+| Per-query semantic code search | Delegated to Claude Code's native agentic search (Grep/Glob) |
 
-**커서와의 분업 구조 — 무엇을 재현하고 무엇은 Claude가 담당하는가**
+**Division of labor:** Cursor's magic has two layers — (a) project-level
+knowledge and (b) per-query embedding retrieval. This toolkit fully recreates
+**(a)**. Layer (b) is intentionally left to Claude Code's own live search,
+which is already strong and always current. Toolkit knowledge + Claude's
+search ≈ the Cursor experience.
 
-커서의 자동 맥락은 두 층입니다: (a) 프로젝트 수준 지식(인덱스 요약·rules)과
-(b) 질문별 관련 코드 검색(임베딩 retrieval). 이 툴킷이 재현하는 것은 **(a)**
-입니다. (b)는 재현하지 않습니다 — Claude Code는 Grep/Glob 기반 에이전틱
-검색이 원래 강점이라 질문별 코드 탐색은 이미 잘합니다. 부족했던 것은 "탐색을
-시작하기 전에 프로젝트가 뭔지 아는 상태"였고, 이 툴킷이 그 층을 채웁니다.
-즉 **툴킷의 프로젝트 지식 + Claude 자체의 실시간 검색 ≈ 커서의 경험**입니다.
+---
 
-**파일 소유권 분리 — 이 툴킷의 핵심 설계**
-
-커서의 인덱스는 사용자 파일과 분리된 내부 산출물이라 승인 없이 갱신해도
-안전합니다. 같은 원리로 이 툴킷은 두 파일을 엄격히 구분합니다:
-
-- **CLAUDE.md** — 사용자가 직접 작성·관리하는 지침. 툴킷은 읽기만 하고 절대
-  건드리지 않습니다. 두 문서가 충돌하면 항상 이쪽이 우선입니다.
-- **`.claude/project-context.md`** — 기계가 생성하는 프로젝트 분석 문서.
-  훅이 세션 시작 시 직접 컨텍스트에 주입하므로 CLAUDE.md에 import 한 줄
-  추가할 필요도 없습니다. 커서의 인덱스처럼 커밋하지 않는 로컬 산출물이
-  기본입니다(.gitignore에 자동 등록). **팀 규모가 크면 커밋해서 공유하는
-  것이 경제적입니다** — 팀원마다 첫 세션에서 각자 생성하는 비용을 한 번으로
-  줄일 수 있습니다 (.gitignore에서 해당 줄을 빼고 커밋하면 이후 갱신도
-  공유됩니다).
-
-**제로터치 설계**: 문서 생성·갱신은 사용자 승인 없이 자동으로 일어납니다.
-문서가 없거나 오래된 세션에서는 Claude가 **사용자의 요청을 먼저 처리한 뒤**
-그 과정에서 파악한 지식으로 같은 턴에서 조용히 생성/갱신합니다. 첫 응답이
-느려지지 않고, 확인 질문도 없습니다.
-
-## 구성 요소
-
-```
-.claude/
-├── settings.json                      # SessionStart 훅 등록
-├── hooks/
-│   ├── session-context.sh             # 세션 시작: 스냅샷 주입 + 신선도 검사
-│   ├── prompt-freshness.sh            # 매 프롬프트: 지문 재검사 (일치하면 침묵)
-│   └── context-fingerprint.sh         # 지문 계산·비교의 단일 진실 공급원
-└── skills/
-    ├── project-onboard/SKILL.md       # project-context.md 자동 생성
-    └── context-refresh/SKILL.md       # project-context.md 증분 갱신
-install.sh                             # 다른 프로젝트에 설치
-```
-
-### 1. SessionStart 훅 — 자동 스냅샷 주입
-
-Claude Code 세션이 시작될 때마다 `session-context.sh`가 실행되어 다음 정보를
-컨텍스트에 자동으로 넣습니다. **질문하기 전에 Claude가 이미 프로젝트를 알고
-시작합니다.**
-
-- 기술 스택 감지: Node/Python/Go/Rust/Java 등 매니페스트 기반 + 프레임워크 + npm scripts
-- 디렉터리 구조: git 추적 파일 기준 깊이 2 트리
-- Git 상태: 현재 브랜치, 최근 커밋 5개, 커밋되지 않은 변경사항
-- **`.claude/project-context.md` 내용 주입**: 자동 생성 문서가 있으면 통째로 주입 (250줄 한도)
-- 신선도 검사: 문서에 저장된 내용 지문을 작업 트리의 현재 상태와 실시간
-  비교하고(+ 20커밋 백스톱), 상황에 맞는 자동 갱신 지시(미세/구조적/전체)를 주입
-
-출력은 컨텍스트 낭비를 막기 위해 항목별로 줄 수를 제한합니다. 또한 훅은
-`startup|clear|compact` 이벤트에서만 실행됩니다 — 세션 재개(resume) 시에는
-스냅샷이 이미 컨텍스트에 있으므로 중복 주입하지 않아 토큰을 아낍니다.
-(compact 후에는 요약 과정에서 스냅샷이 유실될 수 있어 다시 주입하고,
-resume 사이에 코드가 바뀐 경우는 아래 프롬프트 신선도 훅이 잡습니다.)
-
-**프롬프트 신선도 훅(`prompt-freshness.sh`)**: 사용자가 프롬프트를 보낼
-때마다 지문을 재검사합니다. 일치하면 아무것도 출력하지 않고(토큰 비용 0),
-달라진 경우에만 달라진 항목과 "관련 문서 내용을 신뢰하지 말라"는 경고를
-주입합니다. 세션 도중의 커밋·롤백·브랜치 전환이 다음 프롬프트에서 바로
-반영되는, 이 툴킷의 실시간성을 담당하는 핵심 장치입니다.
-
-### 2. `/project-onboard` — 프로젝트 문서 자동 생성
-
-`.claude/project-context.md`가 없으면 훅이 이를 감지하고, Claude가 첫 실질
-작업을 완료한 뒤 같은 턴에서 자동으로 생성합니다 (수동 실행도 가능:
-`/project-onboard`). 명령어·아키텍처·컨벤션·주의사항을 담으며, 이후 세션부터
-훅이 이 문서를 자동 주입하므로 커서처럼 맥락을 알고 시작합니다.
-
-- 명령어는 실제 실행으로 검증 후 기록
-- 린터가 잡는 규칙은 제외하고, 도구가 못 잡는 판단 기준만 기록
-- 200줄 이내로 유지 (긴 내용은 docs/로 분리)
-- CLAUDE.md와 중복되는 내용은 쓰지 않으며, CLAUDE.md는 절대 수정하지 않음
-
-### 3. `/context-refresh` — 문서 증분 갱신
-
-코드는 바뀌는데 문서는 낡아가는 문제를 해결합니다. 커서의 증분 인덱싱처럼
-"변경의 크기"가 아니라 **"변경의 성격"**으로 판단하고, 갱신은 작고 자주
-일어납니다. 트리거는 3단계입니다:
-
-1. **미세 갱신 (항상 활성)** — 작업 중 문서와 실제 코드의 불일치를 발견하면
-   그 부분만 즉시 수정. 지식이 이미 컨텍스트에 있으므로 비용이 사실상 없음
-2. **지문 불일치 감지 (프롬프트 단위 실시간)** — 문서 생성 시점에 구조적
-   파일(매니페스트·CI·빌드 설정)의 내용 해시와 디렉터리 구조 해시를 지문으로
-   저장하고, **세션 시작 시 + 사용자가 프롬프트를 보낼 때마다** 작업 트리의
-   현재 내용과 비교합니다. 커서의 머클 트리 비교와 같은 원리라서 커밋 수와
-   무관합니다: 미커밋 수정도 잡히고, 세션 도중의 커밋·롤백·브랜치 전환도
-   다음 프롬프트에서 즉시 잡히고, 롤백으로 문서 시점 상태에 돌아오면 지문이
-   다시 일치해 불필요한 갱신이 일어나지 않습니다. 프롬프트 훅은 **일치하면
-   아무것도 출력하지 않으므로** 평상시 토큰 비용이 0입니다
-3. **20커밋 백스톱** — 지문으로 잡히지 않는 점진적 드리프트
-   (컨벤션 변화 등)를 위한 최후 방어선
-
-**오도 방지 안전장치** — 이 기능은 Claude의 맥락 파악을 도와야지 방해하면
-안 되므로, 다음을 보장합니다:
-
-- 스냅샷·문서는 "보조 정보"로 명시 주입: 실제 코드와 다르면 실제 코드 우선,
-  CLAUDE.md와 겹치면 CLAUDE.md 우선이라는 우선순위 규칙이 함께 주입됩니다
-- 지문 불일치 시, 낡았을 수 있는 문서 섹션은 **현재 작업 중에도 신뢰하지
-  말라**는 지시가 함께 주입됩니다 (갱신은 작업 후, 불신은 즉시)
-- 문서 주입 시 해시 마커 블록은 제거되고, 250줄 초과 시 잘렸다는 사실이
-  명시됩니다 (조용한 잘림 없음)
-- 디렉터리 지문은 "디렉터리 목록"만 봅니다 — 메모·스크래치 파일 추가로는
-  거짓 "구조 변경" 경고가 나지 않습니다
-- macOS(`shasum`)·Linux(`sha256sum`) 모두 지원합니다. 해시 도구가 없으면
-  거짓 경고나 거짓 "검증됨" 보증을 만드는 대신, 지문 기능이 꺼지고 세션
-  스냅샷에 "지문 검증 불가 — 문서 정보는 실제 파일로 확인하라"는 안내가
-  정직하게 표시됩니다
-
-모든 갱신은 사용자 요청 완료 후 같은 턴에서 조용히 실행됩니다.
-
-## 설치
-
-### 이 저장소를 클론해서 다른 프로젝트에 설치
+## Quick start
 
 ```bash
 git clone https://github.com/HanHyeong/cursor-context.git
@@ -142,56 +34,159 @@ cd cursor-context
 ./install.sh /path/to/your/project
 ```
 
-**설치는 비파괴적이며 병합까지 자동입니다** — 기존 환경에 영향을 주지 않습니다:
+That's it. Restart Claude Code in your project — everything else is automatic.
 
-- 기존 `settings.json`이 있으면 **hooks 배열에만 자동으로 추가 병합**합니다
-  (기존 키·훅의 의미 전부 보존, 병합 전 원본 백업, 재실행 시 중복 등록 없음.
-  단, JSON 재직렬화로 들여쓰기 등 포맷은 정리될 수 있습니다).
-  훅 등록은 배열 추가 방식이라 **기존 훅은 그대로 함께 실행**됩니다.
-  python3가 없거나 JSON이 손상된 경우에만 원본을 건드리지 않고 병합용
-  예시 파일 제공으로 폴백합니다
-- 동명의 기존 훅·스킬은 내용이 다를 때만 `.claude/backup/` 아래로 백업 후
-  교체합니다. 백업은 스킬 탐색 범위 밖이라 백업본이 스킬로 중복 등록되는
-  일이 없습니다
-- 재설치(업그레이드)는 멱등입니다 — 내용이 같으면 아무것도 바꾸지 않습니다
-- 이 툴킷의 훅은 모든 경로에서 `exit 0`이므로 다른 훅이나 프롬프트 처리를
-  차단하지 않습니다
+## What happens after install
 
-### 플랫폼 지원
+1. **Every session start** — a hook injects a compact snapshot into context:
+   - Detected stack (Node/Python/Go/Rust/Java/…), package manager, frameworks, npm scripts
+   - Directory tree (depth 2, tracked files)
+   - Git state: branch, recent commits, uncommitted changes
+   - **Branch intent**: `diff --stat` of your branch vs the default branch — the
+     strongest signal for interpreting terse prompts like "continue" or "finish this"
+   - The generated project doc (if present) plus a freshness verdict
+2. **After your first real task** — Claude silently generates
+   `.claude/project-context.md` (commands verified by running them,
+   architecture, conventions, gotchas — under 200 lines). No approval asked;
+   the file is left uncommitted for you to review. Skipped for read-only or
+   unrelated sessions.
+3. **On every prompt** — a hook re-fingerprints structural files
+   (manifests, lockfiles, CI, build config, directory layout) against the live
+   working tree. If nothing changed it prints **nothing** (zero token cost).
+   If something changed — even uncommitted edits, rollbacks, rebases, or
+   branch switches — Claude is told exactly what differs, not to trust the
+   affected doc sections, and to silently refresh the doc after finishing
+   your request.
 
-| 플랫폼 | 상태 |
+## Detailed usage
+
+### Requirements
+
+- `bash`, `git` (you already have these if you use Claude Code)
+- `sha256sum` (Linux) or `shasum` (macOS) — one of them ships with your OS
+- `python3` — optional, only used to auto-merge hook registration into an
+  existing `settings.json`
+
+### Installation details
+
+`install.sh <target>` copies three hook scripts and two skills into the
+target's `.claude/` directory and registers the hooks. It is **non-destructive
+and idempotent**:
+
+- An existing `settings.json` is never overwritten. Hook entries are
+  **appended** to its `hooks` arrays via python3 (all your keys and hooks are
+  preserved and keep running; JSON semantics preserved, though indentation may
+  be reformatted; the original is backed up first). If python3 is missing or
+  the JSON is malformed, your file is left untouched and a
+  `settings.hooks-example.json` is provided for manual merging.
+- Same-named hooks/skills that differ from ours are backed up to
+  `.claude/backup/install-<timestamp>/` — deliberately *outside*
+  `.claude/skills/` so backups are never picked up as live skills.
+- Re-running the installer changes nothing when contents are identical
+  (no duplicate hook entries, no backup clutter).
+
+Manual install: copy `.claude/` into your project root,
+`chmod +x .claude/hooks/*.sh`, and merge the `hooks` block of
+`settings.json` into yours (append to the arrays — additive, existing hooks
+keep working).
+
+### The generated document
+
+`.claude/project-context.md` is a machine artifact, like Cursor's index:
+
+- Header markers carry the generation commit and a content fingerprint —
+  stripped out before injection so Claude never sees hash noise
+- Injection is capped at 250 lines, and truncation is **announced**, never silent
+- By default it stays uncommitted (auto-added to `.gitignore`). **For teams,
+  commit it instead**: remove the `.gitignore` line — one person's generation
+  then serves everyone, and refreshes are shared too
+- You may edit it by hand, but durable instructions belong in `CLAUDE.md`;
+  hand edits can be overwritten by the next auto-refresh
+
+### Manual commands (optional — automation covers these)
+
+- `/project-onboard` — force a full regeneration of the project doc
+  (deep parallel exploration; use after major restructuring)
+- `/context-refresh` — force an incremental update (diff-driven; only
+  affected sections are rewritten)
+
+### Freshness model (why you can trust what's injected)
+
+Staleness is judged by **content, not commit counts**. The doc stores sha256
+fingerprints of structural files plus a directory-layout hash; hooks recompute
+them against the working tree at session start and on every prompt. Practical
+consequences, all verified by tests:
+
+- Uncommitted manifest edits are caught immediately
+- Rebases, squash merges, hard resets, branch switches — all detected;
+  rolling back to the documented state makes the fingerprint match again,
+  so no wasted refresh
+- Scratch files and notes do **not** trigger false "structure changed" alarms
+  (only directories and structural files are fingerprinted)
+- If verification is impossible (no hash tool, missing marker), the toolkit
+  says so — it never claims "verified" when it isn't
+- Priority rules are injected alongside everything: **live code beats the
+  doc, and your `CLAUDE.md` beats both**
+
+### Uninstall
+
+```bash
+rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh .claude/hooks/context-fingerprint.sh
+rm -rf .claude/skills/project-onboard .claude/skills/context-refresh
+rm -f .claude/project-context.md
+# then remove the two hook entries (session-context.sh / prompt-freshness.sh)
+# from the hooks arrays in .claude/settings.json
+```
+
+### Troubleshooting
+
+- **No snapshot appears in a new session** — check that the hook entries
+  exist in `.claude/settings.json` (if the installer printed a merge warning,
+  merge `settings.hooks-example.json` manually), that the scripts are
+  executable, and that you started a *new* session (the SessionStart hook
+  intentionally skips resume; freshness is still covered per-prompt).
+- **"Fingerprint verification unavailable"** — no `sha256sum`/`shasum` on
+  PATH, or the doc predates fingerprints. Harmless: the toolkit degrades to
+  honest "can't verify" mode; the next doc refresh re-stamps the markers.
+- **Doc looks wrong** — just say so; Claude fixes the affected part and
+  re-stamps (micro-update rule). Or run `/project-onboard` to rebuild.
+- **Too chatty / want it off temporarily** — remove the two hook entries from
+  `settings.json`; files can stay in place.
+
+## Platform support
+
+| Platform | Status |
 |---|---|
-| Linux | ✅ 지원 — 실제 Claude Code 세션에서 E2E 검증됨 |
-| macOS | ✅ 지원 — `shasum` 폴백 포함 (동작 경로 검증됨) |
-| Windows (WSL) | ✅ 지원 — 리눅스와 동일 |
-| Windows (네이티브) | ⚠️ 호환 설계, 실기기 미검증 |
+| Linux | ✅ Supported — verified end-to-end in live Claude Code sessions |
+| macOS | ✅ Supported — `shasum` fallback (code path verified) |
+| Windows (WSL) | ✅ Supported — identical to Linux |
+| Windows (native) | ⚠️ Designed-compatible, not yet device-tested |
 
-네이티브 Windows의 경우: Claude Code가 Git for Windows(Git Bash)를 필수로
-요구하므로 이 툴킷이 쓰는 bash·git·sha256sum·awk는 이미 설치되어 있습니다.
-훅 명령은 cmd 경유 실행에서도 변수 확장이 되도록 `bash -c` 래핑 형식을
-사용합니다. 다만 실제 Windows 기기에서의 검증은 아직 이루어지지 않았으므로
-문제가 있으면 이슈로 알려주세요. `install.sh`는 Git Bash에서 실행하면 됩니다.
+Native Windows: Claude Code requires Git for Windows, which ships every tool
+this toolkit needs (bash, git, sha256sum, awk). Hook commands use a `bash -c`
+wrapper so variable expansion works even when hooks are spawned via cmd. Run
+`install.sh` from Git Bash. Reports welcome.
 
-### 수동 설치
+## Overhead (measured)
 
-`.claude/` 디렉터리를 대상 프로젝트 루트에 복사하고
-`chmod +x .claude/hooks/session-context.sh` 후 Claude Code를 재시작하면 됩니다.
-기존 `.claude/settings.json`이 있다면 `hooks` 섹션만 병합하세요.
+| Metric | Small project (4 files) | Large project (5,004 files) |
+|---|---|---|
+| Session-start hook | 146 ms | 183 ms |
+| Per-prompt hook | 26 ms | 42 ms |
+| Session token cost | ~600–800 tokens + doc (≤250 lines) | same order |
+| Per-prompt token cost | **0 when nothing changed** | **0** |
 
-## 사용 흐름
+Scaling is dominated by `git ls-files`, so even 50k-file monorepos stay well
+under a second.
 
-```
-1. install.sh로 설치 — 사용자가 하는 일은 이것뿐
-2. Claude Code 시작 → 스냅샷 자동 주입 (훅)
-3. 첫 작업 완료 후 → .claude/project-context.md 자동 생성 (승인 불필요)
-4. 이후 모든 세션: 사용자 지침(CLAUDE.md) + 자동 문서 + 스냅샷 = 커서처럼 맥락 파악
-5. 이후 문서는 스스로 신선하게 유지됨: 불일치 발견 즉시 / 구조 변경 즉시 /
-   20커밋 백스톱 — 전부 작업 완료 후 조용히 (CLAUDE.md는 절대 수정 안 됨)
-```
+## Safety guarantees
 
-## 팁: 여기서 더 확장하려면
+- `CLAUDE.md` is treated as strictly user-owned: read, never written
+- Auto-generated/refreshed files are left **uncommitted** for review
+- All hooks exit 0 on every path — they can never block your prompt or
+  other hooks
+- Install is non-destructive (see above) and reversible
 
-- **개인 전역 지침**: `~/.claude/CLAUDE.md`에 개인 코딩 스타일을 적으면 모든 프로젝트에 적용
-- **디렉터리별 지침**: 모노레포라면 `apps/web/CLAUDE.md`처럼 하위 디렉터리에도 배치 가능 (해당 디렉터리 작업 시 자동 로드)
-- **파일 임포트**: CLAUDE.md 안에서 `@docs/architecture.md` 형식으로 다른 문서를 임포트 가능
-- 훅 상세: https://code.claude.com/docs/en/hooks — 스킬 상세: https://code.claude.com/docs/en/skills
+## License
+
+[MIT](LICENSE)
