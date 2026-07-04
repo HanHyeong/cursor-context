@@ -24,17 +24,23 @@ echo "설치 대상: $TARGET"
 
 mkdir -p "$TARGET/.claude/hooks" "$TARGET/.claude/skills"
 
-# 훅 스크립트 복사 (스냅샷 생성기 + 지문 생성기)
-cp "$SRC_DIR/.claude/hooks/session-context.sh" "$SRC_DIR/.claude/hooks/context-fingerprint.sh" "$TARGET/.claude/hooks/"
-chmod +x "$TARGET/.claude/hooks/session-context.sh" "$TARGET/.claude/hooks/context-fingerprint.sh"
-echo "✓ .claude/hooks/session-context.sh"
-echo "✓ .claude/hooks/context-fingerprint.sh"
+# 훅 스크립트 복사 (스냅샷 + 지문 + 프롬프트 신선도)
+for h in session-context.sh context-fingerprint.sh prompt-freshness.sh; do
+  cp "$SRC_DIR/.claude/hooks/$h" "$TARGET/.claude/hooks/"
+  chmod +x "$TARGET/.claude/hooks/$h"
+  echo "✓ .claude/hooks/$h"
+done
 
-# 스킬 복사
-cp -r "$SRC_DIR/.claude/skills/project-onboard" "$TARGET/.claude/skills/"
-cp -r "$SRC_DIR/.claude/skills/context-refresh" "$TARGET/.claude/skills/"
-echo "✓ .claude/skills/project-onboard"
-echo "✓ .claude/skills/context-refresh"
+# 스킬 복사 (기존 동명 스킬이 있으면 백업 후 교체 — 삭제하지 않음)
+for s in project-onboard context-refresh; do
+  if [ -d "$TARGET/.claude/skills/$s" ]; then
+    bak="$TARGET/.claude/skills/$s.bak.$(date +%Y%m%d%H%M%S)"
+    mv "$TARGET/.claude/skills/$s" "$bak"
+    echo "⚠️ 기존 스킬 $s 을(를) $bak 으로 백업하고 교체합니다."
+  fi
+  cp -r "$SRC_DIR/.claude/skills/$s" "$TARGET/.claude/skills/"
+  echo "✓ .claude/skills/$s"
+done
 
 # settings.json: 기존 파일이 있으면 덮어쓰지 않고 예시 파일로 저장
 if [ -f "$TARGET/.claude/settings.json" ]; then

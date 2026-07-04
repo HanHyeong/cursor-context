@@ -15,7 +15,8 @@ MAX_COMMITS=5
 MAX_CHANGED=20
 
 echo "<project-context-snapshot>"
-echo "자동 생성된 프로젝트 스냅샷입니다. 아래 정보를 바탕으로 별도 탐색 없이 프로젝트 맥락을 파악하세요."
+echo "자동 생성된 프로젝트 스냅샷입니다. 프로젝트 맥락 파악과 간결한 요청의 의도 해석에 출발점으로 사용하세요."
+echo "우선순위 규칙: (1) 이 스냅샷·문서는 보조 정보다 — 실제 코드와 다르면 항상 실제 코드가 우선이다. (2) 사용자 지침(CLAUDE.md)과 겹치거나 충돌하면 항상 CLAUDE.md가 우선이다."
 echo ""
 
 # ---------------------------------------------------------------
@@ -82,7 +83,8 @@ echo ""
 # ---------------------------------------------------------------
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "## Git 상태"
-  echo "- 현재 브랜치: $(git branch --show-current 2>/dev/null || echo 'detached HEAD')"
+  cur_branch=$(git branch --show-current 2>/dev/null)
+  echo "- 현재 브랜치: ${cur_branch:-detached HEAD ($(git rev-parse --short HEAD 2>/dev/null))}"
   echo "- 최근 커밋:"
   git log --oneline -"$MAX_COMMITS" 2>/dev/null | sed 's/^/  - /'
   changed=$(git status --porcelain 2>/dev/null | head -"$MAX_CHANGED")
@@ -118,20 +120,24 @@ if [ -f "$CTX_FILE" ]; then
   #   3) 최신이어도 미세 갱신 규칙(발견한 불일치만 즉시 수정)은 항상 주입
   refresh_instructed=""
   FP_HELPER="${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/context-fingerprint.sh"
-  stored_fp=$(sed -n '/context-fingerprint-begin/,/context-fingerprint-end/p' "$CTX_FILE" | grep -E '^[0-9a-f]{64}')
-  if [ -x "$FP_HELPER" ] && [ -n "$stored_fp" ]; then
-    current_fp=$("$FP_HELPER")
-    if [ "$stored_fp" != "$current_fp" ]; then
-      changed=$(printf '%s\n%s\n' "$stored_fp" "$current_fp" | sort | uniq -u | awk '{print $2}' | sort -u | head -10)
+  if [ -x "$FP_HELPER" ]; then
+    # 비교 로직은 지문 생성기의 --changed 모드에 일원화되어 있다 (여기서 재구현 금지).
+    # 종료 코드 3 = 비교 불가(해시 도구/마커 없음) — 이때 "검증됨"이라고 주장하면 안 된다.
+    changed=$("$FP_HELPER" --changed "$CTX_FILE" 2>/dev/null)
+    fp_rc=$?
+    if [ "$fp_rc" -eq 3 ]; then
+      echo "- 지문 검증 불가(해시 도구 또는 지문 마커 없음). 문서 신선도가 보장되지 않으니, 문서의 명령어·구조 정보는 사용 전에 실제 파일로 확인하세요. 다음 갱신 시 context-fingerprint.sh 출력을 마커로 기록하세요."
+    elif [ -n "$changed" ]; then
       echo "- ⚠️ 구조적 상태가 문서 생성 시점과 다릅니다 (작업 트리 실시간 비교 — 미커밋 변경·롤백 포함). 달라진 항목:"
       echo "$changed" | sed 's/^/  - /'
-      echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 위 항목과 관련된 섹션만 $CTX_FILE 에서 조용히 갱신하세요. CLAUDE.md는 건드리지 마세요. 최종 보고 끝에 '프로젝트 문서를 최신화했다'는 한 줄만 덧붙이세요."
+      echo "- 신뢰 제한: 위 항목과 관련된 아래 문서 내용(명령어·스택·구조)은 이번 작업 중에도 신뢰하지 말고 실제 파일을 확인하세요."
+      echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 위 항목과 관련된 섹션만 $CTX_FILE 에서 조용히 갱신하세요. 단, 파일 쓰기가 불가능하거나 부적절한 세션(plan 모드, 읽기 전용 검토)이면 갱신을 건너뛰세요 — 다음 쓰기 가능한 세션에서 자동으로 다시 감지됩니다. CLAUDE.md는 건드리지 마세요. 갱신했다면 최종 보고 끝에 '프로젝트 문서를 최신화했다'는 한 줄만 덧붙이세요."
       refresh_instructed=1
     else
       echo "- 자동 생성 문서가 현재 작업 트리와 일치합니다 (실시간 지문 검증됨)."
     fi
   else
-    echo "- 지문 마커 없음 또는 지문 생성기 없음 — 다음 갱신 시 context-fingerprint.sh 출력을 마커로 기록하세요."
+    echo "- 지문 생성기(context-fingerprint.sh)가 없습니다. 문서 신선도가 보장되지 않으니 문서 정보는 실제 파일로 확인하세요."
   fi
 
   # 커밋 백스톱: 지문으로 못 잡는 점진적 드리프트(컨벤션 변화 등)용
@@ -141,9 +147,13 @@ if [ -f "$CTX_FILE" ]; then
       commits_since=$(git rev-list --count "$gen_commit"..HEAD 2>/dev/null || echo 0)
       if [ "${commits_since:-0}" -gt 20 ]; then
         echo "- ⚠️ 문서 생성 후 커밋이 ${commits_since}개 쌓였습니다. 구조는 같아도 컨벤션·패턴이 달라졌을 수 있습니다."
-        echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 $CTX_FILE 을 조용히 갱신하세요. CLAUDE.md는 건드리지 마세요. 최종 보고 끝에 '프로젝트 문서를 최신화했다'는 한 줄만 덧붙이세요."
+        echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 $CTX_FILE 을 조용히 갱신하세요. 단, 파일 쓰기가 불가능하거나 부적절한 세션(plan 모드, 읽기 전용 검토)이면 갱신을 건너뛰세요. CLAUDE.md는 건드리지 마세요. 갱신했다면 최종 보고 끝에 '프로젝트 문서를 최신화했다'는 한 줄만 덧붙이세요."
         refresh_instructed=1
       fi
+    elif [ -n "$gen_commit" ]; then
+      # 리베이스·스쿼시 머지로 마커 커밋이 히스토리에서 사라진 경우.
+      # 지문이 구조 변경은 계속 감지하므로 강제 갱신은 하지 않되, 상태를 정직하게 알린다.
+      echo "- 참고: 문서의 기준 커밋($gen_commit)이 현재 히스토리에 없습니다(리베이스/스쿼시 머지 추정). 구조 변경은 지문으로 계속 감지되지만 커밋 백스톱은 동작하지 않으니, 다음 문서 갱신 때 마커가 자동 재기록됩니다."
     fi
   fi
 
@@ -152,10 +162,18 @@ if [ -f "$CTX_FILE" ]; then
   fi
   echo ""
   echo "### 자동 생성된 프로젝트 문서 ($CTX_FILE)"
-  head -"$MAX_CTX_LINES" "$CTX_FILE"
+  # 마커 블록(해시 목록·메타 주석)은 Claude에게 의미 없는 노이즈이므로 제거하고 주입.
+  # 줄 단위 필터를 쓴다 — sed 범위 삭제는 블록 끝 표식이 깨져 있으면
+  # 문서 전체를 조용히 삭제해버리므로 절대 사용하지 않는다.
+  doc_body=$(grep -vE '^<!--|^[0-9a-f]{64} |^context-fingerprint-end -->' "$CTX_FILE")
+  total_lines=$(printf '%s\n' "$doc_body" | wc -l | tr -d ' ')
+  printf '%s\n' "$doc_body" | head -"$MAX_CTX_LINES"
+  if [ "$total_lines" -gt "$MAX_CTX_LINES" ]; then
+    echo "(주의: 문서가 ${MAX_CTX_LINES}줄에서 잘렸습니다 — $((total_lines - MAX_CTX_LINES))줄 생략. 완전한 내용이 필요하면 $CTX_FILE 을 직접 읽으세요.)"
+  fi
 else
   echo "- ⚠️ 자동 생성 프로젝트 문서($CTX_FILE) 없음."
-  echo "- 자동 생성 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 project-onboard 스킬 절차에 따라 $CTX_FILE 을 조용히 생성하세요. CLAUDE.md는 절대 건드리지 마세요. 작업 중 이미 파악한 코드베이스 지식을 재활용해 추가 탐색을 최소화하고, 최종 보고 끝에 '프로젝트 문서를 생성했다'는 한 줄만 덧붙이세요. 단, 사용자의 요청이 코드베이스와 무관한 단순 질문이면 생성을 건너뛰세요."
+  echo "- 자동 생성 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 project-onboard 스킬 절차에 따라 $CTX_FILE 을 조용히 생성하세요. CLAUDE.md는 절대 건드리지 마세요. 작업 중 이미 파악한 코드베이스 지식을 재활용해 추가 탐색을 최소화하고, 최종 보고 끝에 '프로젝트 문서를 생성했다'는 한 줄만 덧붙이세요. 건너뛰기 조건: 사용자의 요청이 코드베이스와 무관하거나, 읽기 전용 검토·분석·질문·계획 수립만 요청된 세션이거나, plan 모드인 경우 생성하지 마세요 — 이런 세션에서 파일을 만드는 것은 사용자 의도 위반입니다."
 fi
 echo "</project-context-snapshot>"
 
