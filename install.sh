@@ -24,10 +24,11 @@ echo "설치 대상: $TARGET"
 
 mkdir -p "$TARGET/.claude/hooks" "$TARGET/.claude/skills"
 
-# 훅 스크립트 복사
-cp "$SRC_DIR/.claude/hooks/session-context.sh" "$TARGET/.claude/hooks/"
-chmod +x "$TARGET/.claude/hooks/session-context.sh"
+# 훅 스크립트 복사 (스냅샷 생성기 + 지문 생성기)
+cp "$SRC_DIR/.claude/hooks/session-context.sh" "$SRC_DIR/.claude/hooks/context-fingerprint.sh" "$TARGET/.claude/hooks/"
+chmod +x "$TARGET/.claude/hooks/session-context.sh" "$TARGET/.claude/hooks/context-fingerprint.sh"
 echo "✓ .claude/hooks/session-context.sh"
+echo "✓ .claude/hooks/context-fingerprint.sh"
 
 # 스킬 복사
 cp -r "$SRC_DIR/.claude/skills/project-onboard" "$TARGET/.claude/skills/"
