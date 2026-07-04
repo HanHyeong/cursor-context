@@ -94,6 +94,37 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   else
     echo "- 작업 트리 깨끗함"
   fi
+
+  # 기본 브랜치 대비 이 브랜치의 누적 작업 — "계속해줘", "이거 마무리해줘" 같은
+  # 간결한 프롬프트의 의도를 특정하는 가장 강한 신호다.
+  db=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+  db=${db#origin/}
+  if [ -z "$db" ]; then
+    for cand in main master; do
+      if git show-ref --verify -q "refs/remotes/origin/$cand" || git show-ref --verify -q "refs/heads/$cand"; then
+        db=$cand; break
+      fi
+    done
+  fi
+  if [ -n "$db" ] && [ -n "$cur_branch" ] && [ "$cur_branch" != "$db" ]; then
+    base=""
+    if git show-ref --verify -q "refs/remotes/origin/$db"; then base="origin/$db"
+    elif git show-ref --verify -q "refs/heads/$db"; then base="$db"; fi
+    if [ -n "$base" ]; then
+      diffstat=$(git diff --stat "$base"...HEAD 2>/dev/null)
+      if [ -n "$diffstat" ]; then
+        echo "- 기본 브랜치($base) 대비 이 브랜치의 누적 작업 (간결한 요청의 의도 파악에 참고):"
+        nl=$(printf '%s\n' "$diffstat" | wc -l | tr -d ' ')
+        if [ "$nl" -gt 12 ]; then
+          printf '%s\n' "$diffstat" | head -10 | sed 's/^/  /'
+          echo "  (…중략…)"
+          printf '%s\n' "$diffstat" | tail -1 | sed 's/^/  /'
+        else
+          printf '%s\n' "$diffstat" | sed 's/^/  /'
+        fi
+      fi
+    fi
+  fi
   echo ""
 fi
 

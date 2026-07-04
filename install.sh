@@ -92,19 +92,89 @@ for s in project-onboard context-refresh; do
   echo "✓ .claude/skills/$s"
 done
 
-# settings.json: 기존 파일이 있으면 덮어쓰지 않고 예시 파일로 저장
-if [ -f "$TARGET/.claude/settings.json" ]; then
-  if cmp -s "$SRC_DIR/.claude/settings.json" "$TARGET/.claude/settings.json"; then
-    echo "✓ .claude/settings.json (기존과 동일 — 변경 없음)"
-  else
-    cp "$SRC_DIR/.claude/settings.json" "$TARGET/.claude/settings.hooks-example.json"
-    echo "⚠️ 기존 .claude/settings.json이 있어 덮어쓰지 않았습니다."
-    echo "   .claude/settings.hooks-example.json의 hooks 항목을 기존 파일의 hooks에 '추가'하세요."
-    echo "   훅은 배열에 추가하는 방식이라 기존 훅은 그대로 유지되고 함께 실행됩니다."
-  fi
-else
+# settings.json 훅 등록:
+#   - 파일 없음 → 우리 설정 설치
+#   - 파일 있음 → python3로 hooks 배열에만 '추가' 병합 (기존 키·훅 전부 보존,
+#     이미 등록돼 있으면 무변경, 병합 전 원본 백업)
+#   - python3 없음 / JSON 파싱 실패 → 예시 파일 제공으로 폴백 (원본 불가침)
+merge_py() {
+  python3 - "$TARGET/.claude/settings.json" "$1" <<'PY'
+import json, sys
+path, mode = sys.argv[1], sys.argv[2]
+d = json.load(open(path))
+if not isinstance(d, dict):
+    sys.exit(1)
+h = d.setdefault("hooks", {})
+if not isinstance(h, dict):
+    sys.exit(1)
+
+def registered(event, frag):
+    for m in h.get(event) or []:
+        for k in m.get("hooks") or []:
+            if frag in str(k.get("command", "")):
+                return True
+    return False
+
+changed = False
+if not registered("SessionStart", "session-context.sh"):
+    h.setdefault("SessionStart", []).append({
+        "matcher": "startup|clear|compact",
+        "hooks": [{"type": "command",
+                   "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-context.sh",
+                   "timeout": 15}]})
+    changed = True
+if not registered("UserPromptSubmit", "prompt-freshness.sh"):
+    h.setdefault("UserPromptSubmit", []).append({
+        "hooks": [{"type": "command",
+                   "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/prompt-freshness.sh",
+                   "timeout": 10}]})
+    changed = True
+
+if mode == "check":
+    print("mergeable" if changed else "already")
+    sys.exit(0)
+if changed:
+    with open(path, "w") as f:
+        json.dump(d, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+print("merged" if changed else "already")
+PY
+}
+
+settings_fallback() {
+  cp "$SRC_DIR/.claude/settings.json" "$TARGET/.claude/settings.hooks-example.json"
+  echo "⚠️ settings.json 자동 병합 불가($1). 기존 파일은 건드리지 않았습니다."
+  echo "   .claude/settings.hooks-example.json의 hooks 항목을 기존 파일의 hooks에 '추가'하세요."
+  echo "   훅은 배열에 추가하는 방식이라 기존 훅은 그대로 유지되고 함께 실행됩니다."
+}
+
+if [ ! -f "$TARGET/.claude/settings.json" ]; then
   cp "$SRC_DIR/.claude/settings.json" "$TARGET/.claude/settings.json"
   echo "✓ .claude/settings.json (SessionStart + UserPromptSubmit 훅 등록)"
+elif cmp -s "$SRC_DIR/.claude/settings.json" "$TARGET/.claude/settings.json"; then
+  echo "✓ .claude/settings.json (기존과 동일 — 변경 없음)"
+elif ! command -v python3 >/dev/null 2>&1; then
+  settings_fallback "python3 없음"
+else
+  status=$(merge_py check 2>/dev/null) || status=""
+  case "$status" in
+    already)
+      echo "✓ .claude/settings.json (훅 이미 등록됨 — 변경 없음)"
+      ;;
+    mergeable)
+      ensure_backup_dir
+      cp -p "$TARGET/.claude/settings.json" "$BACKUP_DIR/settings.json"
+      if [ "$(merge_py write 2>/dev/null)" = "merged" ]; then
+        echo "✓ .claude/settings.json (기존 설정 의미 보존, 훅만 자동 추가 — JSON 포맷은 재정렬될 수 있으며 원본은 $BACKUP_DIR/settings.json 에 백업됨)"
+      else
+        cp -p "$BACKUP_DIR/settings.json" "$TARGET/.claude/settings.json"
+        settings_fallback "병합 실패, 원본 복원됨"
+      fi
+      ;;
+    *)
+      settings_fallback "JSON 파싱 실패"
+      ;;
+  esac
 fi
 
 echo ""
