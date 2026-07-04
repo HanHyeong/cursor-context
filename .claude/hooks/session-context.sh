@@ -96,28 +96,39 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------
-# 4. CLAUDE.md 존재 여부 및 신선도 검사
+# 4. 자동 생성 프로젝트 문서 (.claude/project-context.md) 주입 및 신선도 검사
+#    CLAUDE.md는 사용자 소유 지침 파일이므로 절대 자동 수정 대상이 아니다.
+#    자동 생성 컨텍스트는 별도 파일에 두고, 여기서 직접 주입한다.
 # ---------------------------------------------------------------
+CTX_FILE=".claude/project-context.md"
+MAX_CTX_LINES=250
+
 echo "## 프로젝트 문서 상태"
 if [ -f CLAUDE.md ]; then
+  echo "- CLAUDE.md 존재: 이 파일은 **사용자가 관리하는 지침 파일**입니다. 자동 생성/갱신 대상이 아니며, 사용자가 명시적으로 요청하지 않는 한 절대 수정하지 마세요."
+fi
+
+if [ -f "$CTX_FILE" ]; then
+  # 신선도 검사: 파일 상단의 generated-at-commit 마커 기준
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    last_doc_commit=$(git log -1 --format=%H -- CLAUDE.md 2>/dev/null)
-    if [ -n "$last_doc_commit" ]; then
-      commits_since=$(git rev-list --count "$last_doc_commit"..HEAD 2>/dev/null || echo 0)
-      echo "- CLAUDE.md 존재 (마지막 갱신 이후 커밋 수: $commits_since)"
+    gen_commit=$(sed -n 's/.*generated-at-commit: *\([0-9a-f]\{7,40\}\).*/\1/p' "$CTX_FILE" | head -1)
+    if [ -n "$gen_commit" ] && git cat-file -e "$gen_commit" 2>/dev/null; then
+      commits_since=$(git rev-list --count "$gen_commit"..HEAD 2>/dev/null || echo 0)
+      echo "- 자동 생성 문서 존재 (생성 시점 이후 커밋 수: $commits_since)"
       if [ "${commits_since:-0}" -gt 20 ]; then
-        echo "- ⚠️ CLAUDE.md가 오래되었습니다 (문서 내용이 실제 코드와 다를 수 있으니 맹신하지 마세요)."
-        echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 CLAUDE.md를 조용히 갱신하세요. 갱신본은 커밋하지 말고, 최종 보고 끝에 '문서를 최신화했다'는 한 줄만 덧붙이세요."
+        echo "- ⚠️ 자동 생성 문서가 오래되었습니다 (내용이 실제 코드와 다를 수 있으니 맹신하지 마세요)."
+        echo "- 자동 갱신 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 context-refresh 스킬 절차에 따라 $CTX_FILE 을 조용히 갱신하세요. CLAUDE.md는 건드리지 마세요. 최종 보고 끝에 '프로젝트 문서를 최신화했다'는 한 줄만 덧붙이세요."
       fi
     else
-      echo "- CLAUDE.md 존재 (아직 커밋되지 않음)"
+      echo "- 자동 생성 문서 존재 (신선도 마커 없음)"
     fi
-  else
-    echo "- CLAUDE.md 존재"
   fi
+  echo ""
+  echo "### 자동 생성된 프로젝트 문서 ($CTX_FILE)"
+  head -"$MAX_CTX_LINES" "$CTX_FILE"
 else
-  echo "- ⚠️ CLAUDE.md 없음."
-  echo "- 자동 생성 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 project-onboard 스킬 절차에 따라 CLAUDE.md를 조용히 생성하세요. 작업 중 이미 파악한 코드베이스 지식을 재활용해 추가 탐색을 최소화하고, 생성본은 커밋하지 말고 최종 보고 끝에 '프로젝트 문서를 생성했다'는 한 줄만 덧붙이세요. 단, 사용자의 요청이 코드베이스와 무관한 단순 질문이면 생성을 건너뛰세요."
+  echo "- ⚠️ 자동 생성 프로젝트 문서($CTX_FILE) 없음."
+  echo "- 자동 생성 지시: 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 사용자에게 묻지 말고 project-onboard 스킬 절차에 따라 $CTX_FILE 을 조용히 생성하세요. CLAUDE.md는 절대 건드리지 마세요. 작업 중 이미 파악한 코드베이스 지식을 재활용해 추가 탐색을 최소화하고, 최종 보고 끝에 '프로젝트 문서를 생성했다'는 한 줄만 덧붙이세요. 단, 사용자의 요청이 코드베이스와 무관한 단순 질문이면 생성을 건너뛰세요."
 fi
 echo "</project-context-snapshot>"
 
