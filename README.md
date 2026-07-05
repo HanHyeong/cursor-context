@@ -45,11 +45,16 @@ That's it. Restart Claude Code in your project — everything else is automatic.
    - **Branch intent**: `diff --stat` of your branch vs the default branch — the
      strongest signal for interpreting terse prompts like "continue" or "finish this"
    - The generated project doc (if present) plus a freshness verdict
-2. **After your first real task** — Claude silently generates
-   `.cursor-context/project-context.md` (commands verified by running them,
-   architecture, conventions, gotchas — under 200 lines). No approval asked;
-   the file is left uncommitted for you to review. Skipped for read-only or
-   unrelated sessions.
+2. **At install time** — `install.sh` immediately runs a headless Claude
+   session that generates `.cursor-context/project-context.md` (commands
+   verified by running them, architecture, conventions, gotchas — under
+   200 lines). Installing is the opt-in, so indexing starts right away,
+   like Cursor indexing a project the moment you open it. Takes 1–3 minutes
+   and uses API tokens; skip with `--no-onboard`. If the `claude` CLI is
+   unavailable or the run fails, generation falls back to happening
+   silently after your first real task (also after sessions where you asked
+   about the project itself — the exploration already happened, so the
+   knowledge is kept instead of thrown away).
 3. **On every prompt** — a hook re-fingerprints structural files
    (manifests, lockfiles, CI, build config, directory layout) against the live
    working tree. If nothing changed it prints **nothing** (zero token cost).
