@@ -19,11 +19,19 @@
 set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
-TARGET="${1:-}"
+TARGET=""
+NO_ONBOARD=""
+for arg in "$@"; do
+  case "$arg" in
+    --no-onboard) NO_ONBOARD=1 ;;
+    *) TARGET="$arg" ;;
+  esac
+done
 
 if [ -z "$TARGET" ] || [ ! -d "$TARGET" ]; then
-  echo "사용법: ./install.sh /path/to/your/project"
+  echo "사용법: ./install.sh /path/to/your/project [--no-onboard]"
   echo "대상 디렉터리가 존재해야 합니다."
+  echo "  --no-onboard: 설치 직후의 즉시 문서 생성(Claude API 사용)을 건너뜁니다."
   exit 1
 fi
 
@@ -191,9 +199,38 @@ else
   esac
 fi
 
+# ---------------------------------------------------------------
+# 설치 즉시 온보딩 — 설치는 곧 이 기능을 쓰겠다는 의사 표시이므로,
+# 커서가 프로젝트를 열자마자 인덱싱하듯 지금 바로 컨텍스트 문서를 생성한다.
+# claude CLI가 없거나 실패하면 "첫 실질 작업 후 자동 생성"으로 폴백한다.
+# ---------------------------------------------------------------
+echo ""
+if [ -n "$NO_ONBOARD" ]; then
+  echo "ℹ️ 즉시 온보딩 건너뜀(--no-onboard). 문서는 첫 실질 작업 후 자동 생성됩니다."
+elif [ -f "$TARGET/.cursor-context/project-context.md" ]; then
+  echo "✓ 컨텍스트 문서가 이미 존재합니다 — 온보딩 생략."
+elif command -v claude >/dev/null 2>&1; then
+  echo "▶ 즉시 온보딩: 프로젝트를 분석해 컨텍스트 문서를 생성합니다 (1~3분, Claude API 토큰 사용)..."
+  ONBOARD_PROMPT="project-onboard 스킬을 지금 실행해 .cursor-context/project-context.md 를 생성하라. 이것이 이 세션의 유일한 작업이다. 건너뛰기 조건은 적용하지 마라 — 사용자가 설치 시점에 생성을 명시적으로 요청했다."
+  RUNNER="claude"
+  command -v timeout >/dev/null 2>&1 && RUNNER="timeout 600 claude"
+  ( cd "$TARGET" && $RUNNER -p "$ONBOARD_PROMPT" \
+      --settings .claude/settings.json \
+      --allowedTools "Bash,Read,Grep,Glob,Write,Edit" \
+      --permission-mode acceptEdits ) >/dev/null 2>&1 || true
+  if [ -f "$TARGET/.cursor-context/project-context.md" ]; then
+    echo "✓ .cursor-context/project-context.md 생성 완료 — 다음 세션부터 자동 주입됩니다."
+    ( cd "$TARGET" && .claude/hooks/context-benchmark.sh 2>/dev/null | tail -1 ) || true
+  else
+    echo "⚠️ 즉시 온보딩 실패(API 미인증 등). 문서는 첫 실질 작업 후 자동 생성으로 폴백됩니다."
+  fi
+else
+  echo "ℹ️ claude CLI를 찾지 못해 즉시 온보딩을 건너뜁니다. 문서는 첫 실질 작업 후 자동 생성됩니다."
+fi
+
 echo ""
 echo "설치 완료! 다음 단계:"
-echo "  1. 대상 프로젝트에서 Claude Code를 새로 시작하면 스냅샷이 자동 주입됩니다."
-echo "  2. 컨텍스트 문서(.cursor-context/project-context.md)는 첫 실질 작업 후 자동 생성됩니다."
+echo "  1. 대상 프로젝트에서 Claude Code를 새로 시작하면 스냅샷(+문서)이 자동 주입됩니다."
+echo "  2. 이후 문서는 지문 기반으로 자동 갱신·진화합니다. 사용자가 할 일은 없습니다."
 [ -n "$backup_made" ] && echo "  3. 교체된 기존 파일 백업: $BACKUP_DIR"
 exit 0
