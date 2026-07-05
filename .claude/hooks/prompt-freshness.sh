@@ -9,7 +9,7 @@
 set -u
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}" 2>/dev/null || exit 0
 
-CTX_FILE=".claude/project-context.md"
+CTX_FILE=".cursor-context/project-context.md"
 HELPER=".claude/hooks/context-fingerprint.sh"
 [ -f "$CTX_FILE" ] && [ -x "$HELPER" ] || exit 0
 

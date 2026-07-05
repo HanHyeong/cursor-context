@@ -22,6 +22,29 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c \"\\\"$CLAUDE_PROJECT_DIR\\\"/.claude/hooks/evolve-gate.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c \"\\\"$CLAUDE_PROJECT_DIR\\\"/.claude/hooks/metrics-collector.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
