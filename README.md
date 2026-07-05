@@ -12,7 +12,7 @@ on *before* you type your first prompt.
 
 | Cursor feature | This toolkit's counterpart |
 |---|---|
-| Background codebase index (internal artifact) | `.claude/project-context.md` — auto-generated doc, injected every session |
+| Background codebase index (internal artifact) | `.cursor-context/project-context.md` — auto-generated doc, injected every session |
 | Merkle-tree change detection | Content fingerprints compared against the **live working tree** |
 | Index refresh on save | 3-tier auto-refresh: on noticed discrepancy / on structural change / 20-commit backstop |
 | `.cursorrules` (user-authored rules) | `CLAUDE.md` — **user-owned, never touched by the toolkit** |
@@ -46,7 +46,7 @@ That's it. Restart Claude Code in your project — everything else is automatic.
      strongest signal for interpreting terse prompts like "continue" or "finish this"
    - The generated project doc (if present) plus a freshness verdict
 2. **After your first real task** — Claude silently generates
-   `.claude/project-context.md` (commands verified by running them,
+   `.cursor-context/project-context.md` (commands verified by running them,
    architecture, conventions, gotchas — under 200 lines). No approval asked;
    the file is left uncommitted for you to review. Skipped for read-only or
    unrelated sessions.
@@ -69,7 +69,7 @@ That's it. Restart Claude Code in your project — everything else is automatic.
 
 ### Installation details
 
-`install.sh <target>` copies three hook scripts and two skills into the
+`install.sh <target>` copies five hook scripts and three skills into the
 target's `.claude/` directory and registers the hooks. It is **non-destructive
 and idempotent**:
 
@@ -92,7 +92,7 @@ keep working).
 
 ### The generated document
 
-`.claude/project-context.md` is a machine artifact, like Cursor's index:
+`.cursor-context/project-context.md` is a machine artifact, like Cursor's index:
 
 - Header markers carry the generation commit and a content fingerprint —
   stripped out before injection so Claude never sees hash noise
@@ -128,14 +128,43 @@ consequences, all verified by tests:
 - Priority rules are injected alongside everything: **live code beats the
   doc, and your `CLAUDE.md` beats both**
 
+### Self-evaluation and evolution
+
+The toolkit doesn't just stay fresh — it learns from how it gets used, via a
+measure → reflect → mutate → select loop:
+
+- **Measure (deterministic, zero tokens)** — a `PostToolUse` hook logs which
+  commands Claude runs and which files/patterns it explores to
+  `.cursor-context/metrics.jsonl` (fields truncated, auto-rotated at 2,000 lines,
+  local-only). Pure code: the LLM cannot bias its own measurements.
+- **Reflect (near-zero cost)** — every session carries a standing rule: if the
+  doc was wrong or missing something that required real exploration, append
+  one JSON line to `.cursor-context/context-feedback.jsonl` after finishing the task.
+- **Evolve (gated)** — once enough signal accumulates (5 feedback entries or
+  300 metric lines), Claude runs `/context-evolve` after your request:
+  fix what was wrong, add what was repeatedly explored, **delete sections no
+  session ever used** (the 200-line budget forces selection, not growth).
+- **Select (deterministic gate)** — before a new doc is adopted,
+  `context-benchmark.sh` lints it: line budget, marker/fingerprint validity,
+  every mentioned `npm run`/`make` command must actually exist, mentioned
+  paths should exist. **FAIL = the old doc is restored from backup.** The
+  gate and the metrics collector are permanently excluded from evolution —
+  a system that can rewrite its own scorer degenerates.
+
+Code-layer improvement ideas discovered during evolution are only ever
+*proposed* (appended to `.cursor-context/evolve-proposals.md`) — applying them is a
+human decision. Evolution history lives in `.cursor-context/evolve-log.jsonl`.
+
 ### Uninstall
 
 ```bash
-rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh .claude/hooks/context-fingerprint.sh
-rm -rf .claude/skills/project-onboard .claude/skills/context-refresh
-rm -f .claude/project-context.md
-# then remove the two hook entries (session-context.sh / prompt-freshness.sh)
-# from the hooks arrays in .claude/settings.json
+rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
+   .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
+   .claude/hooks/context-benchmark.sh
+rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
+rm -rf .cursor-context
+# then remove the three hook entries (session-context.sh / prompt-freshness.sh /
+# metrics-collector.sh) from the hooks arrays in .claude/settings.json
 ```
 
 ### Troubleshooting

@@ -63,7 +63,7 @@ emit_fingerprint() {
 
 if [ "${1:-}" = "--changed" ]; then
   [ -n "$HASHER" ] || exit 3
-  doc="${2:-.claude/project-context.md}"
+  doc="${2:-.cursor-context/project-context.md}"
   [ -f "$doc" ] || exit 3
   # tr -d '\r': 마커가 CRLF로 기록된 경우에도 영구 불일치 루프에 빠지지 않게 정규화
   stored=$(sed -n '/context-fingerprint-begin/,/context-fingerprint-end/p' "$doc" | tr -d '\r' | grep -E '^[0-9a-f]{64}')
