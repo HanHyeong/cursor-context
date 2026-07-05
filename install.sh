@@ -164,7 +164,7 @@ settings_fallback() {
 
 if [ ! -f "$TARGET/.claude/settings.json" ]; then
   cp "$SRC_DIR/.claude/settings.json" "$TARGET/.claude/settings.json"
-  echo "✓ .claude/settings.json (SessionStart + UserPromptSubmit 훅 등록)"
+  echo "✓ .claude/settings.json (훅 4종 등록: SessionStart, UserPromptSubmit, Stop, PostToolUse)"
 elif cmp -s "$SRC_DIR/.claude/settings.json" "$TARGET/.claude/settings.json"; then
   echo "✓ .claude/settings.json (기존과 동일 — 변경 없음)"
 elif ! command -v python3 >/dev/null 2>&1; then

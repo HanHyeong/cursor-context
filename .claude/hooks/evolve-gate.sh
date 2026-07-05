@@ -27,8 +27,9 @@ except Exception:
 
 [ -f .claude/skills/context-evolve/SKILL.md ] || exit 0
 
-fb=$(grep -c . .cursor-context/context-feedback.jsonl 2>/dev/null || echo 0)
-mt=$(grep -c . .cursor-context/metrics.jsonl 2>/dev/null || echo 0)
+# grep -c는 빈 파일에서 "0" 출력 + rc=1이라 `|| echo 0`과 조합하면 두 줄이 된다. awk 사용.
+fb=$(awk 'NF{n++} END{print n+0}' .cursor-context/context-feedback.jsonl 2>/dev/null || echo 0)
+mt=$(awk 'NF{n++} END{print n+0}' .cursor-context/metrics.jsonl 2>/dev/null || echo 0)
 if [ "${fb:-0}" -ge 5 ] || [ "${mt:-0}" -ge 300 ]; then
   echo "축적된 사용 신호(피드백 ${fb}건, 메트릭 ${mt}건)가 임계값을 넘었습니다. 지금 context-evolve 스킬 절차에 따라 .cursor-context/project-context.md 를 개선하세요: 백업 → 신호 분석 → 재작성 → context-benchmark.sh 게이트 → 신호 파일 소진(백업으로 이동) → evolve-log 기록. CLAUDE.md·훅·스킬·설정은 절대 수정하지 마세요. 단, 이 세션에서 파일 쓰기가 불가능하거나 부적절하면(plan 모드, 읽기 전용) 아무것도 하지 말고 그대로 종료하세요." >&2
   exit 2

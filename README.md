@@ -69,8 +69,12 @@ That's it. Restart Claude Code in your project — everything else is automatic.
 
 ### Installation details
 
-`install.sh <target>` copies five hook scripts and three skills into the
-target's `.claude/` directory and registers the hooks. It is **non-destructive
+`install.sh <target>` copies six hook scripts and three skills into the
+target's `.claude/` directory and registers four hooks (SessionStart,
+UserPromptSubmit, Stop, PostToolUse). Machine-generated data lives in
+`.cursor-context/` at the project root — deliberately outside `.claude/`,
+because Claude Code protects writes under `.claude/` and keeping data there
+would require an approval for every automatic update, breaking zero-touch. It is **non-destructive
 and idempotent**:
 
 - An existing `settings.json` is never overwritten. Hook entries are
@@ -140,10 +144,16 @@ measure → reflect → mutate → select loop:
 - **Reflect (near-zero cost)** — every session carries a standing rule: if the
   doc was wrong or missing something that required real exploration, append
   one JSON line to `.cursor-context/context-feedback.jsonl` after finishing the task.
-- **Evolve (gated)** — once enough signal accumulates (5 feedback entries or
-  300 metric lines), Claude runs `/context-evolve` after your request:
-  fix what was wrong, add what was repeatedly explored, **delete sections no
-  session ever used** (the 200-line budget forces selection, not growth).
+- **Evolve (gated, deterministically enforced)** — once enough signal
+  accumulates (5 feedback entries or 300 metric lines), a `Stop` hook
+  (`evolve-gate.sh`) blocks the turn from ending until `/context-evolve`
+  runs after your request — injected "do it later" instructions proved
+  only probabilistic in testing, so enforcement lives in the harness, not
+  in model compliance. Evolution fixes what was wrong, adds what was
+  repeatedly explored, and **deletes sections no session ever used**
+  (the 200-line budget forces selection, not growth). The gate blocks at
+  most once per threshold crossing and never blocks read-only sessions'
+  work — it simply lets them end if writing is inappropriate.
 - **Select (deterministic gate)** — before a new doc is adopted,
   `context-benchmark.sh` lints it: line budget, marker/fingerprint validity,
   every mentioned `npm run`/`make` command must actually exist, mentioned
@@ -160,11 +170,11 @@ human decision. Evolution history lives in `.cursor-context/evolve-log.jsonl`.
 ```bash
 rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
    .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
-   .claude/hooks/context-benchmark.sh
+   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh
 rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
 rm -rf .cursor-context
-# then remove the three hook entries (session-context.sh / prompt-freshness.sh /
-# metrics-collector.sh) from the hooks arrays in .claude/settings.json
+# then remove the four hook entries (session-context.sh / prompt-freshness.sh /
+# metrics-collector.sh / evolve-gate.sh) from the hooks arrays in .claude/settings.json
 ```
 
 ### Troubleshooting

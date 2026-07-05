@@ -194,8 +194,10 @@ if [ -f "$CTX_FILE" ]; then
 
   # 자기 평가 루프: 반성(피드백 적재) 규칙은 항상 주입, 진화는 임계값 도달 시만
   echo "- 학습 기록 규칙: 이번 세션에서 (a) 아래 문서가 틀려서 고쳤거나 (b) 문서에 없어서 상당한 탐색이 필요했던 주제가 있으면, 작업 완료 후 .cursor-context/context-feedback.jsonl 에 {\"type\":\"wrong\"|\"gap\",\"area\":\"주제\",\"note\":\"한 줄 설명\"} 형식의 JSON 한 줄을 추가하세요. 해당 없으면 기록하지 마세요."
-  fb_count=$(grep -c . .cursor-context/context-feedback.jsonl 2>/dev/null || echo 0)
-  mt_count=$(grep -c . .cursor-context/metrics.jsonl 2>/dev/null || echo 0)
+  # 주의: grep -c는 "파일은 있는데 매치 0건"일 때 0을 출력하고 rc=1을 반환하므로
+  # `|| echo 0`과 조합하면 "0\n0" 두 줄이 되어 정수 비교가 깨진다. awk로 계수한다.
+  fb_count=$(awk 'NF{n++} END{print n+0}' .cursor-context/context-feedback.jsonl 2>/dev/null || echo 0)
+  mt_count=$(awk 'NF{n++} END{print n+0}' .cursor-context/metrics.jsonl 2>/dev/null || echo 0)
   if [ -z "$refresh_instructed" ] && { [ "${fb_count:-0}" -ge 5 ] || [ "${mt_count:-0}" -ge 300 ]; }; then
     echo "- 진화 지시: 사용 신호가 충분히 쌓였습니다 (피드백 ${fb_count}건, 메트릭 ${mt_count}건). 사용자의 현재 요청을 먼저 완료한 뒤, 같은 턴에서 묻지 말고 context-evolve 스킬을 실행해 문서를 개선하세요. 단, 파일 쓰기가 불가능하거나 부적절한 세션(plan 모드, 읽기 전용 검토)이면 건너뛰세요."
   fi

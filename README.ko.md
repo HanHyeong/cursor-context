@@ -189,8 +189,9 @@ cd cursor-context
 ### 수동 설치
 
 `.claude/` 디렉터리를 대상 프로젝트 루트에 복사하고
-`chmod +x .claude/hooks/session-context.sh` 후 Claude Code를 재시작하면 됩니다.
-기존 `.claude/settings.json`이 있다면 `hooks` 섹션만 병합하세요.
+`chmod +x .claude/hooks/*.sh` 후 Claude Code를 재시작하면 됩니다.
+기존 `.claude/settings.json`이 있다면 `hooks` 섹션만 병합하세요
+(배열에 추가하는 방식이라 기존 훅은 그대로 함께 실행됩니다).
 
 ## 사용 흐름
 
@@ -214,10 +215,14 @@ cd cursor-context
 - **반성 (비용 ≈ 0)** — 매 세션에 상시 규칙 주입: 문서가 틀렸거나 없어서
   탐색이 필요했던 주제가 있으면 작업 후 `.cursor-context/context-feedback.jsonl`에
   JSON 한 줄을 남깁니다.
-- **진화 (게이트 통과 시만)** — 신호가 쌓이면(피드백 5건 또는 메트릭 300줄)
-  작업 완료 후 `/context-evolve`가 자동 실행: 틀린 것 수정, 반복 탐색된 것
-  추가, **어떤 세션도 안 쓴 섹션 삭제** (200줄 예산이 "더 많이"가 아니라
-  "더 잘 고르기"를 강제).
+- **진화 (게이트 통과 시만, 결정론적 강제)** — 신호가 쌓이면(피드백 5건 또는
+  메트릭 300줄) `Stop` 훅(`evolve-gate.sh`)이 턴 종료를 차단하고 작업 완료 후
+  `/context-evolve` 실행을 강제합니다 — "나중에 하라"는 주입 지시는 확률적
+  보장뿐임이 실측으로 확인되어, 강제는 모델 준수가 아닌 하네스에 둡니다.
+  차단은 임계값 교차당 최대 1회이며(신호 소진으로 자기 해제 + stop_hook_active
+  가드), 쓰기가 부적절한 세션은 그대로 종료를 허용합니다. 진화 내용: 틀린 것
+  수정, 반복 탐색된 것 추가, **어떤 세션도 안 쓴 섹션 삭제** (200줄 예산이
+  "더 많이"가 아니라 "더 잘 고르기"를 강제).
 - **선택 (결정론적 게이트)** — 새 문서 채택 전 `context-benchmark.sh`가
   검사: 줄 수 예산, 마커·지문 유효성, 언급된 `npm run`/`make` 명령의 실재,
   언급 경로의 실재. **불합격이면 백업에서 이전 문서 자동 복원.** 게이트와
@@ -233,11 +238,11 @@ cd cursor-context
 ```bash
 rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
    .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
-   .claude/hooks/context-benchmark.sh
+   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh
 rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
 rm -rf .cursor-context
 # 마지막으로 .claude/settings.json의 hooks 배열에서 session-context.sh /
-# prompt-freshness.sh / metrics-collector.sh 세 항목을 제거하세요.
+# prompt-freshness.sh / metrics-collector.sh / evolve-gate.sh 네 항목을 제거하세요.
 ```
 
 ## 문제 해결
