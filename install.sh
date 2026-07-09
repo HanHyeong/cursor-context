@@ -154,7 +154,10 @@ MSG_ko_uninstall_done_nobackup="제거 완료(백업할 것 없음)."
 msg() {
   key="$1"
   varname="MSG_${CTX_LANG}_${key}"
-  printf '%s' "${!varname}"
+  # 번역 누락 시 영어로 폴백하고, 그것도 없으면 빈 문자열을 낸다 —
+  # set -u 환경에서 미정의 키의 간접 참조가 스크립트를 죽이지 못하게 한다.
+  [ -n "${!varname-}" ] || varname="MSG_en_${key}"
+  printf '%s' "${!varname-}"
 }
 # --는 printf에게 "다음부터는 옵션이 아니라 인자"라고 알린다. 이게 없으면
 # ✓/⚠️로 시작하지 않는 -로 시작하는 포맷 문자열이 옵션 플래그로 오인될 수 있다.
@@ -501,6 +504,7 @@ LANG=$CTX_LANG
 # METRICS_THRESHOLD=300
 # COMMIT_BACKSTOP=20
 # DOC_LINE_BUDGET=200
+# DOC_MIN_LINES=10
 CFG
   msgf config_generated "$CTX_LANG"
 else

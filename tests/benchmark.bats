@@ -53,6 +53,26 @@ body_of() { yes "line" | head -n "$1"; }
   [ "$status" -eq 1 ]
 }
 
+@test "an effectively empty body FAILs the minimum-content floor (delete-everything mutation is never adoptable)" {
+  # 마커만 있고 실질 본문이 거의 없는 문서 — 예산 상한만으로는 나머지 검사를
+  # 전부 공허하게 PASS해(언급 명령·경로가 없으니) 채택될 수 있었던 퇴행 케이스다.
+  { marker; echo "# t"; echo ""; } > doc.md
+  run .claude/hooks/context-benchmark.sh doc.md
+  [[ "$output" == *"FAIL: 본문 실질 1줄 — 최소 10 미만"* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "DOC_MIN_LINES in the config file overrides the default floor of 10" {
+  cat > .cursor-context/config << 'EOF'
+LANG=ko
+DOC_MIN_LINES=3
+EOF
+  { marker; body_of 5; } > doc.md
+  run .claude/hooks/context-benchmark.sh doc.md
+  [[ "$output" == *"PASS: 본문 실질 5줄 (최소 3 이상)"* ]]
+  [ "$status" -eq 0 ]
+}
+
 @test "a missing generated-at-commit marker FAILs" {
   body_of 10 > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
@@ -69,7 +89,7 @@ body_of() { yes "line" | head -n "$1"; }
 
 @test "a documented npm script that exists PASSes" {
   echo '{"scripts": {"build": "tsc"}}' > package.json
-  { marker; echo 'Run `npm run build`.'; } > doc.md
+  { marker; body_of 20; echo 'Run `npm run build`.'; } > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
   [[ "$output" == *"PASS: 문서의 'npm run' 명령 전부 실재"* ]]
   [ "$status" -eq 0 ]
@@ -77,7 +97,7 @@ body_of() { yes "line" | head -n "$1"; }
 
 @test "a documented npm script that does not exist FAILs (exact check)" {
   echo '{"scripts": {"build": "tsc"}}' > package.json
-  { marker; echo 'Run `npm run ghost-script`.'; } > doc.md
+  { marker; body_of 20; echo 'Run `npm run ghost-script`.'; } > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
   [[ "$output" == *"FAIL: 문서가 언급한 존재하지 않는 npm 스크립트: ghost-script"* ]]
   [ "$status" -eq 1 ]
@@ -85,7 +105,7 @@ body_of() { yes "line" | head -n "$1"; }
 
 @test "yarn's run-omitted shorthand is checked too, without false-failing on yarn builtins" {
   echo '{"scripts": {"test": "jest"}}' > package.json
-  { marker; echo 'Use `yarn test`, `yarn install`, and `yarn ghost`.'; } > doc.md
+  { marker; body_of 20; echo 'Use `yarn test`, `yarn install`, and `yarn ghost`.'; } > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
   [[ "$output" == *"FAIL: 문서가 언급한 존재하지 않는 npm 스크립트: ghost"* ]]
   [ "$status" -eq 1 ]
@@ -93,7 +113,7 @@ body_of() { yes "line" | head -n "$1"; }
 
 @test "a documented make target that exists PASSes" {
   printf 'build:\n\techo hi\n' > Makefile
-  { marker; echo 'Run `make build`.'; } > doc.md
+  { marker; body_of 20; echo 'Run `make build`.'; } > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
   [[ "$output" == *"PASS: 문서의 make 타깃 전부 실재"* ]]
   [ "$status" -eq 0 ]
@@ -101,14 +121,14 @@ body_of() { yes "line" | head -n "$1"; }
 
 @test "a documented make target that does not exist FAILs (exact check)" {
   printf 'build:\n\techo hi\n' > Makefile
-  { marker; echo 'Run `make ghost-target`.'; } > doc.md
+  { marker; body_of 20; echo 'Run `make ghost-target`.'; } > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
   [[ "$output" == *"FAIL: 문서가 언급한 존재하지 않는 make 타깃: ghost-target"* ]]
   [ "$status" -eq 1 ]
 }
 
 @test "a documented path that does not exist WARNs but does not fail the gate (heuristic)" {
-  { marker; echo 'See `src/ghost/file.ts` for details.'; } > doc.md
+  { marker; body_of 20; echo 'See `src/ghost/file.ts` for details.'; } > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
   [[ "$output" == *"WARN: 문서가 언급했지만 존재하지 않는 경로"* ]]
   [[ "$output" == *"src/ghost/file.ts"* ]]
@@ -118,7 +138,7 @@ body_of() { yes "line" | head -n "$1"; }
 @test "a documented path that exists PASSes" {
   mkdir -p src
   echo "ok" > src/real.ts
-  { marker; echo 'See `src/real.ts` for details.'; } > doc.md
+  { marker; body_of 20; echo 'See `src/real.ts` for details.'; } > doc.md
   run .claude/hooks/context-benchmark.sh doc.md
   [[ "$output" == *"PASS: 문서 언급 경로 1개 전부 실재"* ]]
   [ "$status" -eq 0 ]

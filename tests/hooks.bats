@@ -195,6 +195,18 @@ seed_signals() {
   grep -q '"cmd": "npm test"' .cursor-context/metrics.jsonl
 }
 
+@test "metrics-collector.sh redacts credential-shaped values in logged Bash commands" {
+  echo '{"tool_name":"Bash","tool_input":{"command":"curl -H \"Authorization: Bearer abc123xyz\" --api-key=SUPERSECRET https://example.com && export DB_PASSWORD=hunter2 && npm test"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  grep -q 'redacted' .cursor-context/metrics.jsonl
+  ! grep -q 'SUPERSECRET' .cursor-context/metrics.jsonl
+  ! grep -q 'abc123xyz' .cursor-context/metrics.jsonl
+  ! grep -q 'hunter2' .cursor-context/metrics.jsonl
+  # 명령의 형태(무엇을 하려 했는지)는 신호로 남아야 한다
+  grep -q 'npm test' .cursor-context/metrics.jsonl
+}
+
 @test "metrics-collector.sh ignores tool calls it does not track" {
   echo '{"tool_name":"Write","tool_input":{"file_path":"foo.txt"}}' > input.json
   run .claude/hooks/metrics-collector.sh < input.json
@@ -285,7 +297,7 @@ EOF
   mkdir -p "$PLUGIN_DIR"
   cp "$REPO_ROOT"/.claude/hooks/context-benchmark.sh "$REPO_ROOT"/.claude/hooks/context-fingerprint.sh "$REPO_ROOT"/.claude/hooks/lib-config.sh "$PLUGIN_DIR/"
   chmod +x "$PLUGIN_DIR"/*.sh
-  { echo "<!-- generated-at-commit: 0000000000000000000000000000000000000a -->"; echo "doc body"; } > doc.md
+  { echo "<!-- generated-at-commit: 0000000000000000000000000000000000000a -->"; yes "doc body" | head -n 20; } > doc.md
   run "$PLUGIN_DIR/context-benchmark.sh" doc.md
   [ "$status" -eq 0 ]
   # 지문 헬퍼를 못 찾았다면 "지문 검증 불가"가 아니라 "명령을 찾을 수 없음"류의
@@ -312,6 +324,32 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"<context-freshness-alert>"* ]]
   [[ "$output" == *"package.json"* ]]
+}
+
+@test "evolve-gate.sh blocks under a plugin-only layout (skill beside the hook dir, no project .claude/)" {
+  PLUGIN_ROOT="$(mktemp -d)"
+  mkdir -p "$PLUGIN_ROOT/hooks" "$PLUGIN_ROOT/skills/context-evolve"
+  cp "$REPO_ROOT"/.claude/hooks/evolve-gate.sh "$REPO_ROOT"/.claude/hooks/lib-config.sh "$PLUGIN_ROOT/hooks/"
+  chmod +x "$PLUGIN_ROOT/hooks/"*.sh
+  echo "ok" > "$PLUGIN_ROOT/skills/context-evolve/SKILL.md"
+  rm -rf .claude   # 플러그인 단독 설치: 프로젝트에 .claude/가 없다
+  seed_signals
+  echo '{"stop_hook_active": false, "session_id": "plugin-sess"}' > input.json
+  run "$PLUGIN_ROOT/hooks/evolve-gate.sh" < input.json
+  [ "$status" -eq 2 ]
+  [ -f .cursor-context/.gate-fired-plugin-sess ]
+}
+
+@test "metrics-collector.sh logs under a plugin-only layout (no project .claude/)" {
+  PLUGIN_ROOT="$(mktemp -d)"
+  mkdir -p "$PLUGIN_ROOT/hooks"
+  cp "$REPO_ROOT"/.claude/hooks/metrics-collector.sh "$PLUGIN_ROOT/hooks/"
+  chmod +x "$PLUGIN_ROOT/hooks/"*.sh
+  rm -rf .claude   # 플러그인 단독 설치: 프로젝트에 .claude/가 없다
+  echo '{"tool_name":"Read","tool_input":{"file_path":"foo.txt"}}' > input.json
+  run "$PLUGIN_ROOT/hooks/metrics-collector.sh" < input.json
+  [ "$status" -eq 0 ]
+  grep -q '"path": "foo.txt"' .cursor-context/metrics.jsonl
 }
 
 @test "session-context.sh honors COMMIT_BACKSTOP from config" {
