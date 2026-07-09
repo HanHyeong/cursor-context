@@ -78,7 +78,10 @@ MSG_ko_path_ok="문서 언급 경로 %s개 전부 실재"
 msg() {
   key="$1"
   varname="MSG_${CTX_LANG}_${key}"
-  printf '%s' "${!varname}"
+  # 번역 누락 시 영어로 폴백하고, 그것도 없으면 빈 문자열을 낸다 —
+  # set -u 환경에서 미정의 키의 간접 참조가 스크립트를 죽이지 못하게 한다.
+  [ -n "${!varname-}" ] || varname="MSG_en_${key}"
+  printf '%s' "${!varname-}"
 }
 
 hard=0; soft=0; pass=0

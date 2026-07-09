@@ -195,6 +195,18 @@ seed_signals() {
   grep -q '"cmd": "npm test"' .cursor-context/metrics.jsonl
 }
 
+@test "metrics-collector.sh redacts credential-shaped values in logged Bash commands" {
+  echo '{"tool_name":"Bash","tool_input":{"command":"curl -H \"Authorization: Bearer abc123xyz\" --api-key=SUPERSECRET https://example.com && export DB_PASSWORD=hunter2 && npm test"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  grep -q 'redacted' .cursor-context/metrics.jsonl
+  ! grep -q 'SUPERSECRET' .cursor-context/metrics.jsonl
+  ! grep -q 'abc123xyz' .cursor-context/metrics.jsonl
+  ! grep -q 'hunter2' .cursor-context/metrics.jsonl
+  # 명령의 형태(무엇을 하려 했는지)는 신호로 남아야 한다
+  grep -q 'npm test' .cursor-context/metrics.jsonl
+}
+
 @test "metrics-collector.sh ignores tool calls it does not track" {
   echo '{"tool_name":"Write","tool_input":{"file_path":"foo.txt"}}' > input.json
   run .claude/hooks/metrics-collector.sh < input.json

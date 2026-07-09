@@ -53,7 +53,13 @@ That's it. Restart Claude Code in your project — everything else is automatic.
    verified by running them, architecture, conventions, gotchas — under
    200 lines). Installing is the opt-in, so indexing starts right away,
    like Cursor indexing a project the moment you open it. Takes 1–3 minutes
-   and uses API tokens; skip with `--no-onboard`. If the `claude` CLI is
+   and uses API tokens; skip with `--no-onboard`. Be aware what "verified
+   by running them" means: the session may execute the project's own
+   test/lint/typecheck/build commands to confirm they work. It is
+   instructed to run **side-effect-free commands only** — deploy, publish,
+   migration, or anything state-changing is never executed, only checked
+   for existence — but if you don't want anything running at install time,
+   use `--no-onboard`. If the `claude` CLI is
    unavailable or the run fails, generation falls back to happening
    silently after your first real task (also after sessions where you asked
    about the project itself — the exploration already happened, so the
@@ -194,6 +200,11 @@ measure → reflect → mutate → select loop:
   commands Claude runs and which files/patterns it explores to
   `.cursor-context/metrics.jsonl` (fields truncated, auto-rotated at 2,000 lines,
   local-only). Pure code: the LLM cannot bias its own measurements.
+  Privacy note: logged commands are plaintext. Credential-shaped values
+  (`token=`, `password=`, `api-key=`, `Bearer …`) are redacted best-effort
+  before writing, but that is a safety net, not a guarantee — don't pass raw
+  secrets as CLI arguments. The file is gitignored and never leaves your
+  machine.
 - **Reflect (near-zero cost)** — every session carries a standing rule: if the
   doc was wrong or missing something that required real exploration, append
   one JSON line to `.cursor-context/context-feedback.jsonl` after finishing the task.
