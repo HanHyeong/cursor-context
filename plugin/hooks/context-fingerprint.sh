@@ -52,9 +52,13 @@ emit_fingerprint() {
     # 개별 파일 추가(메모, .env, 스크래치 등)로는 절대 바뀌지 않아야
     # 거짓 "구조 변경" 경고가 나지 않는다. 파일 내용 변경은 위의
     # 매니페스트 해시가 담당한다.
+    # .cursor-context/(툴킷 자신의 데이터 계층)는 항상 제외한다 — 팀 공유
+    # 모드(gitignore 해제)에서는 진화 백업(backup/evolve-<ts>/) 같은 미추적
+    # 디렉터리가 --others에 잡혀, 툴킷의 자기 활동이 거짓 "구조 변경" 알람과
+    # 불필요한 갱신 루프를 유발했다. 자기 관측은 지문 대상이 아니다.
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       dirhash=$(git ls-files --cached --others --exclude-standard 2>/dev/null \
-        | awk -F/ 'NF>=2{print $1} NF>=3{print $1"/"$2}' \
+        | awk -F/ '$1==".cursor-context"{next} NF>=2{print $1} NF>=3{print $1"/"$2}' \
         | sort -u | $HASHER | cut -d' ' -f1)
       echo "$dirhash  directory-structure"
     fi

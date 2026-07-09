@@ -29,6 +29,7 @@ DOC="${1:-.cursor-context/project-context.md}"
 # 기본값을 먼저 설정한 뒤 .cursor-context/config가 있으면 그 값으로 덮어쓴다
 # (lib-config.sh가 없거나 로드 실패해도 아래 기본값으로 정상 동작한다).
 DOC_LINE_BUDGET=200
+DOC_MIN_LINES=10
 CTX_LANG=en
 # shellcheck disable=SC1091
 . "$HOOK_DIR/lib-config.sh" 2>/dev/null || true
@@ -44,6 +45,10 @@ MSG_en_body_warn="body: %s lines (over %s -- trim recommended)"
 MSG_ko_body_warn="본문 %s줄 (%s 초과 — 다이어트 권장)"
 MSG_en_body_fail="body: %s lines -- over %s, will be truncated on injection"
 MSG_ko_body_fail="본문 %s줄 — %s 초과, 주입 시 잘림"
+MSG_en_body_floor_ok="body has %s non-empty lines (min %s)"
+MSG_ko_body_floor_ok="본문 실질 %s줄 (최소 %s 이상)"
+MSG_en_body_floor_fail="body: only %s non-empty lines -- under the minimum of %s; an effectively empty doc must not be adopted"
+MSG_ko_body_floor_fail="본문 실질 %s줄 — 최소 %s 미만, 사실상 빈 문서는 채택 불가"
 MSG_en_marker_ok="generated-at-commit marker present"
 MSG_ko_marker_ok="generated-at-commit 마커 존재"
 MSG_en_marker_fail="generated-at-commit marker missing"
@@ -97,6 +102,14 @@ body_lines=$(grep -vcE '^<!--|^[0-9a-f]{64} |^context-fingerprint-end -->' "$DOC
 if [ "$body_lines" -le "$DOC_LINE_BUDGET" ]; then ok "$(msg body_pass)" "$body_lines" "$DOC_LINE_BUDGET"
 elif [ "$body_lines" -le "$WARN_CEILING" ]; then warn "$(msg body_warn)" "$body_lines" "$DOC_LINE_BUDGET"
 else fail "$(msg body_fail)" "$body_lines" "$WARN_CEILING"; fi
+
+# 1b. 본문 하한 (정확 검사 → FAIL). 예산 상한만 있으면 "전부 삭제" 변이가
+# 모든 검사를 공허하게 통과해 채택될 수 있다(빈 문서는 언급 명령·경로도
+# 없으므로 나머지 검사가 전부 PASS다). 실질(비공백) 줄 수가 하한 미만이면
+# 내용이 사실상 없는 퇴행 문서로 보고 채택을 막는다.
+body_nonempty=$(grep -vE '^<!--|^[0-9a-f]{64} |^context-fingerprint-end -->' "$DOC" | grep -c '[^[:space:]]')
+if [ "${body_nonempty:-0}" -ge "$DOC_MIN_LINES" ]; then ok "$(msg body_floor_ok)" "$body_nonempty" "$DOC_MIN_LINES"
+else fail "$(msg body_floor_fail)" "$body_nonempty" "$DOC_MIN_LINES"; fi
 
 # 2. 신선도 마커 유효성
 if grep -q 'generated-at-commit:' "$DOC"; then ok "$(msg marker_ok)"

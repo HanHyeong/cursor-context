@@ -148,6 +148,7 @@ it's missing.
 | `METRICS_THRESHOLD` | `300` | metric lines before the evolve gate fires |
 | `COMMIT_BACKSTOP` | `20` | commits since doc generation before a refresh is requested |
 | `DOC_LINE_BUDGET` | `200` | target line budget `context-benchmark.sh` enforces (WARN at +50, FAIL beyond that) |
+| `DOC_MIN_LINES` | `10` | minimum non-empty body lines — below this the benchmark FAILs, so a rewrite that guts the doc can never be adopted |
 
 `PASS`/`WARN`/`FAIL` and the `Result: PASS=x WARN=y FAIL=z` summary line stay
 in that exact form regardless of language — `context-evolve`'s acceptance
@@ -174,6 +175,11 @@ and [`tests/hooks.bats`](tests/hooks.bats), which run in CI on every push:
   so no wasted refresh
 - Scratch files and notes do **not** trigger false "structure changed" alarms
   (only directories and structural files are fingerprinted)
+- `.cursor-context/` itself (the toolkit's own data layer — doc, metrics,
+  evolve backups) is excluded from the structure hash, so toolkit activity
+  never triggers its own refresh alarm — including in team mode, where the
+  directory is committed and evolve backups would otherwise show up as new
+  untracked directories
 - If verification is impossible (no hash tool, missing marker), the toolkit
   says so — it never claims "verified" when it isn't
 - Priority rules are injected alongside everything: **live code beats the
@@ -207,11 +213,17 @@ measure → reflect → mutate → select loop:
   session gets one fresh block. The gate never blocks read-only sessions'
   work — it simply lets them end if writing is inappropriate.
 - **Select (deterministic gate)** — before a new doc is adopted,
-  `context-benchmark.sh` lints it: line budget, marker/fingerprint validity,
-  every mentioned `npm run`/`make` command must actually exist, mentioned
-  paths should exist. **FAIL = the old doc is restored from backup.** The
-  gate and the metrics collector are permanently excluded from evolution —
-  a system that can rewrite its own scorer degenerates.
+  `context-benchmark.sh` lints it: line budget, a minimum-content floor
+  (`DOC_MIN_LINES` — a mutation that guts the doc can never be adopted),
+  marker/fingerprint validity, every mentioned `npm run`/`make` command must
+  actually exist, mentioned paths should exist. **FAIL = the old doc is
+  restored from backup.** Honest scope note: the gate verifies form and the
+  factual claims that can be checked against the repo — it cannot measure
+  semantic usefulness. That judgment stays with the model doing the rewrite;
+  the gate's job is bounding it (no regressions on verifiable properties, no
+  degenerate outcomes), not scoring prose quality. The gate and the metrics
+  collector are permanently excluded from evolution — a system that can
+  rewrite its own scorer degenerates.
 
 Code-layer improvement ideas discovered during evolution are only ever
 *proposed* (appended to `.cursor-context/evolve-proposals.md`) — applying them is a

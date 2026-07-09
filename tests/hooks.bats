@@ -285,7 +285,7 @@ EOF
   mkdir -p "$PLUGIN_DIR"
   cp "$REPO_ROOT"/.claude/hooks/context-benchmark.sh "$REPO_ROOT"/.claude/hooks/context-fingerprint.sh "$REPO_ROOT"/.claude/hooks/lib-config.sh "$PLUGIN_DIR/"
   chmod +x "$PLUGIN_DIR"/*.sh
-  { echo "<!-- generated-at-commit: 0000000000000000000000000000000000000a -->"; echo "doc body"; } > doc.md
+  { echo "<!-- generated-at-commit: 0000000000000000000000000000000000000a -->"; yes "doc body" | head -n 20; } > doc.md
   run "$PLUGIN_DIR/context-benchmark.sh" doc.md
   [ "$status" -eq 0 ]
   # 지문 헬퍼를 못 찾았다면 "지문 검증 불가"가 아니라 "명령을 찾을 수 없음"류의

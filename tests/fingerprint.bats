@@ -83,6 +83,20 @@ write_doc_with_fingerprint() {
   [ -z "$output" ]
 }
 
+@test "toolkit-owned .cursor-context/ activity never changes the fingerprint (team-commit mode)" {
+  # 팀 공유 모드: .cursor-context/가 gitignore되지 않은 저장소를 재현한다.
+  # 이 픽스처에는 .gitignore가 없으므로 아래 디렉터리·파일은 전부 미추적
+  # 상태로 --others에 잡힌다 — 예전에는 진화 백업 디렉터리(backup/evolve-*)가
+  # 생길 때마다 directory-structure 해시가 바뀌어 거짓 알람이 났다.
+  write_doc_with_fingerprint
+  mkdir -p .cursor-context/backup/evolve-20260101000000
+  echo "old doc" > .cursor-context/backup/evolve-20260101000000/project-context.md
+  echo '{"tool":"Read"}' > .cursor-context/metrics.jsonl
+  run ./context-fingerprint.sh --changed project-context.md
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "adding a new top-level directory changes the directory-structure fingerprint" {
   write_doc_with_fingerprint
   mkdir -p newpkg

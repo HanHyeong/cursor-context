@@ -7,6 +7,9 @@
 #   METRICS_THRESHOLD   (기본 300) — evolve-gate: 메트릭 라인 수 임계값
 #   COMMIT_BACKSTOP     (기본 20)  — session-context: 커밋 수 백스톱
 #   DOC_LINE_BUDGET      (기본 200) — context-benchmark: 문서 줄 수 목표
+#   DOC_MIN_LINES       (기본 10)  — context-benchmark: 본문 실질(비공백) 줄 수
+#                                    하한. 미만이면 FAIL — 내용을 다 지워버린
+#                                    퇴행 문서가 게이트를 통과하지 못하게 한다
 #   CTX_LANG            (기본 en)  — 훅 출력 언어. 설정 파일의 키 이름은
 #                                    "LANG"이지만, 시스템 로케일 변수 $LANG과
 #                                    충돌하지 않도록 내부 변수명은 CTX_LANG을 쓴다.
@@ -20,6 +23,7 @@
 : "${METRICS_THRESHOLD:=300}"
 : "${COMMIT_BACKSTOP:=20}"
 : "${DOC_LINE_BUDGET:=200}"
+: "${DOC_MIN_LINES:=10}"
 : "${CTX_LANG:=en}"
 
 _cc_config_file=".cursor-context/config"
@@ -40,6 +44,8 @@ if [ -f "$_cc_config_file" ]; then
         case "$_cc_val" in ''|*[!0-9]*) ;; *) COMMIT_BACKSTOP="$_cc_val" ;; esac ;;
       DOC_LINE_BUDGET)
         case "$_cc_val" in ''|*[!0-9]*) ;; *) DOC_LINE_BUDGET="$_cc_val" ;; esac ;;
+      DOC_MIN_LINES)
+        case "$_cc_val" in ''|*[!0-9]*) ;; *) DOC_MIN_LINES="$_cc_val" ;; esac ;;
       LANG)
         case "$_cc_val" in ko|en) CTX_LANG="$_cc_val" ;; esac ;;
       *) : ;;  # 알 수 없는 키는 무시 (임의 변수 주입 방지)
