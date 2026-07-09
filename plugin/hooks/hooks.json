@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c \"\\\"$CLAUDE_PLUGIN_ROOT\\\"/hooks/session-context.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c \"\\\"$CLAUDE_PLUGIN_ROOT\\\"/hooks/prompt-freshness.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c \"\\\"$CLAUDE_PLUGIN_ROOT\\\"/hooks/evolve-gate.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c \"\\\"$CLAUDE_PLUGIN_ROOT\\\"/hooks/metrics-collector.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

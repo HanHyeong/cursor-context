@@ -3,6 +3,9 @@
 **Cursor-grade automatic project context awareness for Claude Code** — zero-touch, real-time, and honest about what it knows.
 
 > 한국어 문서: [README.ko.md](README.ko.md) · Status: **Beta** · License: MIT
+>
+> [![CI](https://github.com/HanHyeong/cursor-context/actions/workflows/ci.yml/badge.svg)](https://github.com/HanHyeong/cursor-context/actions/workflows/ci.yml)
+> — shellcheck + [bats](tests/) on an ubuntu/macOS matrix
 
 Cursor IDE understands your project without being told, thanks to background
 indexing, `.cursorrules`, and automatic context injection. This toolkit
@@ -99,6 +102,25 @@ Manual install: copy `.claude/` into your project root,
 `settings.json` into yours (append to the arrays — additive, existing hooks
 keep working).
 
+### Plugin install (alternative)
+
+Claude Code plugins are supported natively via the [`plugin/`](plugin/)
+directory — no `install.sh`, no writes under your project's `.claude/`:
+
+```
+/plugin marketplace add HanHyeong/cursor-context   # or: point at a local checkout
+/plugin install cursor-context
+```
+
+The plugin ships the same hook scripts and skills as `install.sh`, just
+addressed by `${CLAUDE_PLUGIN_ROOT}` instead of
+`${CLAUDE_PROJECT_DIR}/.claude`. Machine-generated data still lands in
+`.cursor-context/` at your project root either way — a plugin install is not
+project-scoped storage, so this keeps the two distributions interchangeable.
+Both installation methods are maintained side by side for now; `install.sh`
+will be marked deprecated only after the plugin path has had a release or two
+to prove out.
+
 ### The generated document
 
 `.cursor-context/project-context.md` is a machine artifact, like Cursor's index:
@@ -112,6 +134,25 @@ keep working).
 - You may edit it by hand, but durable instructions belong in `CLAUDE.md`;
   hand edits can be overwritten by the next auto-refresh
 
+### Configuration
+
+`install.sh` writes `.cursor-context/config` (KEY=VALUE, `#` comments) with a
+guessed `LANG` based on your system locale at install time. Delete the file,
+or any line in it, to fall back to the built-in defaults — nothing breaks if
+it's missing.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `LANG` | `en` | `ko` or `en` — language of hook-injected text and installer output |
+| `FEEDBACK_THRESHOLD` | `5` | feedback entries before the evolve gate fires |
+| `METRICS_THRESHOLD` | `300` | metric lines before the evolve gate fires |
+| `COMMIT_BACKSTOP` | `20` | commits since doc generation before a refresh is requested |
+| `DOC_LINE_BUDGET` | `200` | target line budget `context-benchmark.sh` enforces (WARN at +50, FAIL beyond that) |
+
+`PASS`/`WARN`/`FAIL` and the `Result: PASS=x WARN=y FAIL=z` summary line stay
+in that exact form regardless of language — `context-evolve`'s acceptance
+criterion parses those literal tokens.
+
 ### Manual commands (optional — automation covers these)
 
 - `/project-onboard` — force a full regeneration of the project doc
@@ -124,7 +165,8 @@ keep working).
 Staleness is judged by **content, not commit counts**. The doc stores sha256
 fingerprints of structural files plus a directory-layout hash; hooks recompute
 them against the working tree at session start and on every prompt. Practical
-consequences, all verified by tests:
+consequences, all covered by [`tests/fingerprint.bats`](tests/fingerprint.bats)
+and [`tests/hooks.bats`](tests/hooks.bats), which run in CI on every push:
 
 - Uncommitted manifest edits are caught immediately
 - Rebases, squash merges, hard resets, branch switches — all detected;
@@ -157,7 +199,12 @@ measure → reflect → mutate → select loop:
   in model compliance. Evolution fixes what was wrong, adds what was
   repeatedly explored, and **deletes sections no session ever used**
   (the 200-line budget forces selection, not growth). The gate blocks at
-  most once per threshold crossing and never blocks read-only sessions'
+  most once per threshold crossing when evolution actually runs (the
+  signal files are consumed, so the condition clears itself); if a session
+  skips evolution instead (plan mode, read-only), a per-session sentinel
+  (`.cursor-context/.gate-fired-<session_id>`) still caps it at once **per
+  session** so it doesn't re-fire on every subsequent turn — a fresh
+  session gets one fresh block. The gate never blocks read-only sessions'
   work — it simply lets them end if writing is inappropriate.
 - **Select (deterministic gate)** — before a new doc is adopted,
   `context-benchmark.sh` lints it: line budget, marker/fingerprint validity,
@@ -173,9 +220,25 @@ human decision. Evolution history lives in `.cursor-context/evolve-log.jsonl`.
 ### Uninstall
 
 ```bash
+./install.sh /path/to/your/project --uninstall
+```
+
+This removes the toolkit's hooks and skills, and strips only this toolkit's
+four hook entries out of `.claude/settings.json` — any other hooks you've
+registered in the same events are left alone. Nothing is deleted outright:
+everything removed is moved to `.claude/backup/uninstall-<timestamp>/` first,
+so an uninstall is always reversible. `.cursor-context/` (the generated doc
+and metrics data) is kept by default; add `--purge-data` to remove that too.
+
+If `python3` is unavailable, hook entries can't be auto-removed from
+`settings.json` — the command tells you which lines to delete by hand.
+
+Manual removal (equivalent, if you'd rather not use the script):
+
+```bash
 rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
    .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
-   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh
+   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh .claude/hooks/lib-config.sh
 rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
 rm -rf .cursor-context
 # then remove the four hook entries (session-context.sh / prompt-freshness.sh /
@@ -201,8 +264,8 @@ rm -rf .cursor-context
 
 | Platform | Status |
 |---|---|
-| Linux | ✅ Supported — verified end-to-end in live Claude Code sessions |
-| macOS | ✅ Supported — `shasum` fallback (code path verified) |
+| Linux | ✅ Supported — verified end-to-end in live Claude Code sessions, and by CI |
+| macOS | ✅ Supported — `shasum` fallback verified by CI on a macOS runner (`tests/fingerprint.bats`, `tests/hooks.bats`) |
 | Windows (WSL) | ✅ Supported — identical to Linux |
 | Windows (native) | ⚠️ Designed-compatible, not yet device-tested |
 
@@ -217,11 +280,42 @@ wrapper so variable expansion works even when hooks are spawned via cmd. Run
 |---|---|---|
 | Session-start hook | 146 ms | 183 ms |
 | Per-prompt hook | 26 ms | 42 ms |
+| PostToolUse hook (metrics) | ~14 ms/call | same order |
 | Session token cost | ~600–800 tokens + doc (≤250 lines) | same order |
 | Per-prompt token cost | **0 when nothing changed** | **0** |
 
 Scaling is dominated by `git ls-files`, so even 50k-file monorepos stay well
-under a second.
+under a second. The metrics hook's ~14 ms is dominated by `python3` process
+startup, not I/O — at the 2,000-line rotation cap, reading the whole log adds
+well under 1 ms. The full-log rotation check now runs on ~1% of calls
+(probabilistic) instead of every call, which mainly reduces total I/O
+operations over a long session rather than single-call latency at this scale;
+rotation can lag by up to ~100 calls before it fires, never unbounded growth.
+
+## Testing
+
+```bash
+shellcheck .claude/hooks/*.sh install.sh   # zero warnings, enforced in CI
+bats tests/*.bats
+```
+
+- [`tests/fingerprint.bats`](tests/fingerprint.bats) — fingerprint generation
+  and comparison: manifest edits/rollbacks, scratch-file invariance, CRLF
+  marker normalization
+- [`tests/install.bats`](tests/install.bats) — installer idempotency,
+  settings.json merge/backup, python3-unavailable fallback, type-mismatch
+  backup handling
+- [`tests/hooks.bats`](tests/hooks.bats) — session snapshot structure,
+  freshness-hook silence when unchanged, evolve-gate threshold + per-session
+  sentinel behavior, metrics logging/rotation
+- [`tests/benchmark.bats`](tests/benchmark.bats) — line-budget verdicts,
+  FAIL on nonexistent npm/make targets, WARN (not FAIL) on nonexistent paths
+- [`tests/MANUAL.md`](tests/MANUAL.md) — a checklist for what CI structurally
+  cannot cover (the headless-onboarding E2E needs live API auth; hook
+  injection behavior can only be observed in a real Claude Code session)
+
+CI (`.github/workflows/ci.yml`) runs shellcheck and the full bats suite on an
+ubuntu-latest/macos-latest matrix on every push and PR.
 
 ## Safety guarantees
 

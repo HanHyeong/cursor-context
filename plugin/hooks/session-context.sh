@@ -1,0 +1,1 @@
+../../.claude/hooks/session-context.sh

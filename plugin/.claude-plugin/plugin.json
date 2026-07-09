@@ -1,0 +1,13 @@
+{
+  "name": "cursor-context",
+  "version": "0.1.0",
+  "description": "Cursor-grade automatic project context awareness for Claude Code -- zero-touch project doc generation, real-time freshness tracking, and usage-driven evolution via hooks and skills.",
+  "author": {
+    "name": "HanHyeong",
+    "url": "https://github.com/HanHyeong"
+  },
+  "homepage": "https://github.com/HanHyeong/cursor-context",
+  "repository": "https://github.com/HanHyeong/cursor-context",
+  "license": "MIT",
+  "keywords": ["context", "onboarding", "documentation", "productivity", "auto-context"]
+}

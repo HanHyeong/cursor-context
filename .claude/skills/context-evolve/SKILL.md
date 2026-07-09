@@ -11,6 +11,14 @@ description: 축적된 사용 신호(metrics.jsonl)와 세션 피드백(context-
 - 측정(metrics-collector 훅) → 반성(세션 피드백) → **변이(이 스킬의 재작성)
   → 선택(벤치마크 게이트)** → 채택 또는 폐기
 
+## 출력 언어
+
+`.cursor-context/config`에 `LANG=en`이 설정돼 있으면(기본값은 en이다 —
+README가 영어 우선이므로) project-context.md **본문**을 한국어 대신
+영어로 작성한다. 이 SKILL.md 자체의 절차 설명은 번역 대상이 아니다 —
+읽는 주체가 사람이 아니라 Claude이므로 언어와 무관하게 동일하게 이해한다.
+config가 없거나 `LANG=ko`면 한국어로 작성한다.
+
 ## 절대 규칙 (진화의 경계)
 
 1. **수정 대상은 오직 `.cursor-context/project-context.md`와 자기 로그 파일뿐이다.**

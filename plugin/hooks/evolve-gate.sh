@@ -1,0 +1,1 @@
+../../.claude/hooks/evolve-gate.sh

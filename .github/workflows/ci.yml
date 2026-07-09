@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS도 매트릭스에 포함하는 이유: shasum 폴백 경로(sha256sum이 기본
+        # 없는 환경)와 BSD 계열 도구(find, sed 등)의 동작 차이를 실기기에서
+        # 검증하기 위함이다. ubuntu만으로는 이 차이를 잡아내지 못한다.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure shellcheck is available
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y shellcheck
+            elif command -v brew >/dev/null 2>&1; then
+              brew install shellcheck
+            fi
+          fi
+          shellcheck --version
+
+      - name: Ensure bats is available
+        run: |
+          if ! command -v bats >/dev/null 2>&1; then
+            if command -v npm >/dev/null 2>&1; then
+              npm install -g bats
+            elif command -v brew >/dev/null 2>&1; then
+              brew install bats-core
+            fi
+          fi
+          bats --version
+
+      - name: shellcheck all hook scripts and install.sh
+        run: shellcheck .claude/hooks/*.sh install.sh
+
+      - name: run bats test suite
+        run: bats tests/*.bats

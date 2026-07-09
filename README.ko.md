@@ -3,6 +3,9 @@
 **Claude Code에서 커서(Cursor) IDE 수준의 자동 프로젝트 맥락 파악을 재현하는 툴킷**
 
 > English documentation: [README.md](README.md) · 상태: **베타** · 라이선스: [MIT](LICENSE)
+>
+> [![CI](https://github.com/HanHyeong/cursor-context/actions/workflows/ci.yml/badge.svg)](https://github.com/HanHyeong/cursor-context/actions/workflows/ci.yml)
+> — shellcheck + [bats](tests/) 테스트가 ubuntu/macOS 매트릭스에서 매 푸시마다 실행됨
 
 커서 IDE는 별도 지시 없이도 프로젝트 맥락을 잘 파악합니다. 이는 (1) 코드베이스
 자동 인덱싱, (2) `.cursorrules` 기반 프로젝트 지침, (3) 열린 파일/최근 편집
@@ -56,16 +59,22 @@
 │   ├── context-fingerprint.sh         # 지문 계산·비교의 단일 진실 공급원
 │   ├── metrics-collector.sh           # 도구 사용 신호 측정 (자기 평가용)
 │   ├── evolve-gate.sh                 # Stop 게이트: 신호 임계 도달 시 진화 강제
-│   └── context-benchmark.sh           # 문서 품질 게이트 (진화 채택 심사)
+│   ├── context-benchmark.sh           # 문서 품질 게이트 (진화 채택 심사)
+│   └── lib-config.sh                  # .cursor-context/config 공유 로더 (훅 아님)
 └── skills/
     ├── project-onboard/SKILL.md       # 문서 자동 생성
     ├── context-refresh/SKILL.md       # 문서 증분 갱신
     └── context-evolve/SKILL.md        # 사용 신호 기반 문서 진화
 .cursor-context/                       # 데이터 계층 (기계 생성, gitignore 권장)
+├── config                             # KEY=VALUE 설정 (LANG, 임계값 등 — 선택)
 ├── project-context.md                 # 자동 생성 컨텍스트 문서
 ├── metrics.jsonl / context-feedback.jsonl / evolve-log.jsonl
 └── backup/                            # 진화 전 문서 백업 (롤백 수단)
-install.sh                             # 다른 프로젝트에 설치
+install.sh                             # 다른 프로젝트에 설치 (또는 --uninstall로 제거)
+plugin/                                # Claude Code 플러그인 배치 (install.sh의 대안)
+├── .claude-plugin/plugin.json         # 플러그인 매니페스트
+├── hooks/                             # .claude/hooks/*로의 심볼릭 링크 + hooks.json
+└── skills/                            # .claude/skills/*로의 심볼릭 링크
 ```
 
 데이터 계층을 `.claude/` 밖에 두는 이유: Claude Code는 `.claude/` 내부 파일
@@ -179,8 +188,8 @@ cd cursor-context
 
 | 플랫폼 | 상태 |
 |---|---|
-| Linux | ✅ 지원 — 실제 Claude Code 세션에서 E2E 검증됨 |
-| macOS | ✅ 지원 — `shasum` 폴백 포함 (동작 경로 검증됨) |
+| Linux | ✅ 지원 — 실제 Claude Code 세션에서 E2E 검증됨 + CI |
+| macOS | ✅ 지원 — `shasum` 폴백을 macOS CI 러너에서 검증(`tests/fingerprint.bats`, `tests/hooks.bats`) |
 | Windows (WSL) | ✅ 지원 — 리눅스와 동일 |
 | Windows (네이티브) | ⚠️ 호환 설계, 실기기 미검증 |
 
@@ -190,12 +199,49 @@ cd cursor-context
 사용합니다. 다만 실제 Windows 기기에서의 검증은 아직 이루어지지 않았으므로
 문제가 있으면 이슈로 알려주세요. `install.sh`는 Git Bash에서 실행하면 됩니다.
 
+### 설정
+
+`install.sh`가 설치 시점에 시스템 로케일로 `LANG`을 추정해
+`.cursor-context/config`(KEY=VALUE, `#` 주석)를 생성합니다. 파일이나 개별
+줄을 지우면 훅에 내장된 기본값으로 돌아갑니다 — 없어도 동작에 지장 없습니다.
+
+| 키 | 기본값 | 의미 |
+|---|---|---|
+| `LANG` | `en` | `ko` 또는 `en` — 훅 주입 텍스트·설치 출력 언어 |
+| `FEEDBACK_THRESHOLD` | `5` | 진화 게이트가 발동하는 피드백 건수 |
+| `METRICS_THRESHOLD` | `300` | 진화 게이트가 발동하는 메트릭 줄 수 |
+| `COMMIT_BACKSTOP` | `20` | 문서 생성 후 갱신을 요청하기까지의 커밋 수 |
+| `DOC_LINE_BUDGET` | `200` | `context-benchmark.sh`가 강제하는 목표 줄 수 (+50에서 WARN, 그 이상 FAIL) |
+
+`PASS`/`WARN`/`FAIL`과 `결과: PASS=x WARN=y FAIL=z` 요약 줄은 언어와 무관하게
+항상 이 형태 그대로입니다 — `context-evolve`의 채택 기준이 이 정확한
+토큰을 읽기 때문입니다.
+
 ### 수동 설치
 
 `.claude/` 디렉터리를 대상 프로젝트 루트에 복사하고
 `chmod +x .claude/hooks/*.sh` 후 Claude Code를 재시작하면 됩니다.
 기존 `.claude/settings.json`이 있다면 `hooks` 섹션만 병합하세요
 (배열에 추가하는 방식이라 기존 훅은 그대로 함께 실행됩니다).
+
+### 플러그인 설치 (대안)
+
+`install.sh` 없이, 프로젝트의 `.claude/`에 아무것도 쓰지 않고 설치하는
+방법입니다. [`plugin/`](plugin/) 디렉터리가 Claude Code 플러그인 형식을
+그대로 따릅니다:
+
+```
+/plugin marketplace add HanHyeong/cursor-context   # 또는 로컬 체크아웃 경로를 지정
+/plugin install cursor-context
+```
+
+훅 스크립트·스킬 내용은 `install.sh`와 동일하고, 참조 방식만
+`${CLAUDE_PROJECT_DIR}/.claude` 대신 `${CLAUDE_PLUGIN_ROOT}`를 씁니다.
+기계 생성 데이터는 이 경우에도 프로젝트 루트의 `.cursor-context/`에
+그대로 쌓입니다 — 플러그인이라고 별도 저장 위치를 쓰지 않으므로 두 설치
+방식을 자유롭게 오갈 수 있습니다. 두 방식은 당분간 함께 유지되며,
+`install.sh`는 플러그인 방식이 한두 릴리스 정도 검증된 뒤에야 폐기 절차를
+밟습니다.
 
 ## 사용 흐름
 
@@ -223,10 +269,14 @@ cd cursor-context
   메트릭 300줄) `Stop` 훅(`evolve-gate.sh`)이 턴 종료를 차단하고 작업 완료 후
   `/context-evolve` 실행을 강제합니다 — "나중에 하라"는 주입 지시는 확률적
   보장뿐임이 실측으로 확인되어, 강제는 모델 준수가 아닌 하네스에 둡니다.
-  차단은 임계값 교차당 최대 1회이며(신호 소진으로 자기 해제 + stop_hook_active
-  가드), 쓰기가 부적절한 세션은 그대로 종료를 허용합니다. 진화 내용: 틀린 것
-  수정, 반복 탐색된 것 추가, **어떤 세션도 안 쓴 섹션 삭제** (200줄 예산이
-  "더 많이"가 아니라 "더 잘 고르기"를 강제).
+  진화가 실제로 실행되면 신호 파일이 소진되어 임계 조건 자체가 해제되므로
+  차단은 임계값 교차당 최대 1회입니다(+ stop_hook_active 가드). 진화를
+  건너뛴 세션(plan 모드, 읽기 전용 등)에서는 신호가 소진되지 않지만, 세션
+  단위 sentinel(`.cursor-context/.gate-fired-<session_id>`)이 **세션당 최대
+  1회**로 다시 제한합니다 — 같은 세션의 다음 턴들은 통과하고, 새 세션에서는
+  다시 1회 차단됩니다. 쓰기가 부적절한 세션은 그대로 종료를 허용합니다.
+  진화 내용: 틀린 것 수정, 반복 탐색된 것 추가, **어떤 세션도 안 쓴 섹션
+  삭제** (200줄 예산이 "더 많이"가 아니라 "더 잘 고르기"를 강제).
 - **선택 (결정론적 게이트)** — 새 문서 채택 전 `context-benchmark.sh`가
   검사: 줄 수 예산, 마커·지문 유효성, 언급된 `npm run`/`make` 명령의 실재,
   언급 경로의 실재. **불합격이면 백업에서 이전 문서 자동 복원.** 게이트와
@@ -237,12 +287,50 @@ cd cursor-context
 쌓이고, 적용은 사람이 결정합니다. 진화 이력은 `.cursor-context/evolve-log.jsonl`에
 남습니다.
 
+## 테스트
+
+```bash
+shellcheck .claude/hooks/*.sh install.sh   # 경고 0건, CI에서 강제
+bats tests/*.bats
+```
+
+- `tests/fingerprint.bats` — 지문 생성·비교: 매니페스트 수정/롤백, 스크래치
+  파일 불변성, CRLF 마커 정규화
+- `tests/install.bats` — 설치 멱등성, settings.json 병합·백업, python3 부재
+  폴백, 타입 불일치 백업 처리
+- `tests/hooks.bats` — 세션 스냅샷 구조, 신선도 훅의 무변경 시 침묵,
+  evolve-gate 임계값 + 세션 단위 sentinel 동작, 메트릭 기록·회전
+- `tests/benchmark.bats` — 줄 수 예산 판정, 존재하지 않는 npm/make 명령은
+  FAIL, 존재하지 않는 경로는 WARN(FAIL 아님)
+- `tests/MANUAL.md` — CI가 구조적으로 검증할 수 없는 항목 체크리스트
+  (헤드리스 온보딩 E2E는 실제 API 인증 필요, 훅 주입 동작은 실제 Claude Code
+  세션에서만 확인 가능)
+
+`.github/workflows/ci.yml`이 매 푸시·PR마다 ubuntu-latest/macos-latest
+매트릭스에서 shellcheck와 전체 bats 스위트를 실행합니다.
+
 ## 제거 방법
+
+```bash
+./install.sh /path/to/your/project --uninstall
+```
+
+이 툴킷의 훅·스킬을 제거하고, `.claude/settings.json`에서도 이 툴킷이 등록한
+훅 4종만 골라 제거합니다 — 같은 이벤트에 등록된 다른 훅은 그대로 남습니다.
+아무것도 완전히 삭제하지 않고 먼저 `.claude/backup/uninstall-<timestamp>/`로
+옮긴 뒤 제거하므로 언제든 되돌릴 수 있습니다. `.cursor-context/`(생성된 문서와
+메트릭 데이터)는 기본적으로 보존되며, 이것까지 지우려면 `--purge-data`를
+추가하세요.
+
+`python3`가 없으면 `settings.json`의 훅 항목을 자동으로 제거할 수 없습니다 —
+이 경우 어떤 줄을 직접 지워야 하는지 안내가 출력됩니다.
+
+수동 제거(스크립트 대신 직접 하고 싶다면, 동일한 결과):
 
 ```bash
 rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
    .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
-   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh
+   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh .claude/hooks/lib-config.sh
 rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
 rm -rf .cursor-context
 # 마지막으로 .claude/settings.json의 hooks 배열에서 session-context.sh /
