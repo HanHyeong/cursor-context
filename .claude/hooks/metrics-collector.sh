@@ -19,7 +19,10 @@ set -u
 [ -n "${CURSOR_CONTEXT_BENCH:-}" ] && exit 0
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}" 2>/dev/null || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
-[ -d .claude ] || exit 0   # 툴킷이 설치된 프로젝트에서만 동작
+# 프로젝트 쪽 디렉터리 존재(.claude 등)는 요구하지 않는다 — 이 훅이 실행된다는
+# 것 자체가 활성화 신호다(install.sh 배치는 프로젝트 settings.json 등록,
+# 플러그인 배치는 플러그인 활성화). 예전의 `[ -d .claude ]` 가드는 플러그인
+# 단독 설치(프로젝트에 .claude/가 없음)에서 측정을 통째로 꺼버렸다.
 mkdir -p .cursor-context 2>/dev/null || exit 0
 
 # 3<&0: 훅의 원래 stdin(도구 JSON)을 fd3에 보존 — heredoc이 fd0을 파이썬

@@ -65,7 +65,12 @@ active=$(printf '%s\n' "$info" | sed -n 1p)
 session_id=$(printf '%s\n' "$info" | sed -n 2p)
 [ "$active" = "1" ] && exit 0
 
-[ -f .claude/skills/context-evolve/SKILL.md ] || exit 0
+# 진화 스킬이 실제로 존재할 때만 강제한다. install.sh 배치는 프로젝트의
+# .claude/skills/에, 플러그인 배치는 훅 디렉터리의 형제 디렉터리
+# ($HOOK_DIR/../skills/)에 스킬이 있다 — 프로젝트 경로만 검사하면 플러그인
+# 단독 설치에서 게이트가 영원히 조용히 통과해 버린다.
+[ -f .claude/skills/context-evolve/SKILL.md ] \
+  || [ -f "$HOOK_DIR/../skills/context-evolve/SKILL.md" ] || exit 0
 
 # 세션 단위 sentinel. 파일명 안전을 위해 영숫자/-_ 외 문자는 치환.
 sentinel=""

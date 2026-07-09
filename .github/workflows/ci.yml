@@ -30,18 +30,38 @@ jobs:
           shellcheck --version
 
       - name: Ensure bats is available
+        # apt/brew를 우선한다. `npm install -g`는 러너의 전역 prefix가 root
+        # 소유라 sudo 없이 EACCES로 죽는다(run #1 실패 원인) — npm 폴백에도
+        # sudo를 붙인다.
         run: |
           if ! command -v bats >/dev/null 2>&1; then
-            if command -v npm >/dev/null 2>&1; then
-              npm install -g bats
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y bats
             elif command -v brew >/dev/null 2>&1; then
               brew install bats-core
+            elif command -v npm >/dev/null 2>&1; then
+              sudo npm install -g bats || npm install -g bats
             fi
           fi
           bats --version
 
       - name: shellcheck all hook scripts and install.sh
         run: shellcheck .claude/hooks/*.sh install.sh
+
+      - name: plugin tree must mirror .claude (real files, no symlinks, no drift)
+        # plugin/의 훅·스킬은 .claude/의 실파일 복사본이다. 심볼릭 링크는
+        # 네이티브 Windows 체크아웃에서 경로 문자열이 담긴 일반 파일로
+        # 구체화되어 깨지므로 금지하고, 복사본이 원본과 어긋나지 않는지
+        # 바이트 단위로 검증한다.
+        run: |
+          links=$(find plugin -type l)
+          if [ -n "$links" ]; then
+            echo "symlinks are not allowed under plugin/:"; echo "$links"; exit 1
+          fi
+          for f in .claude/hooks/*.sh; do
+            cmp "$f" "plugin/hooks/$(basename "$f")"
+          done
+          diff -r .claude/skills plugin/skills
 
       - name: run bats test suite
         run: bats tests/*.bats

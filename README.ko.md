@@ -73,8 +73,8 @@
 install.sh                             # 다른 프로젝트에 설치 (또는 --uninstall로 제거)
 plugin/                                # Claude Code 플러그인 배치 (install.sh의 대안)
 ├── .claude-plugin/plugin.json         # 플러그인 매니페스트
-├── hooks/                             # .claude/hooks/*로의 심볼릭 링크 + hooks.json
-└── skills/                            # .claude/skills/*로의 심볼릭 링크
+├── hooks/                             # .claude/hooks/*의 실파일 복사본 + hooks.json
+└── skills/                            # .claude/skills/*의 실파일 복사본 (CI가 동기화 검증)
 ```
 
 데이터 계층을 `.claude/` 밖에 두는 이유: Claude Code는 `.claude/` 내부 파일
@@ -307,7 +307,9 @@ bats tests/*.bats
   세션에서만 확인 가능)
 
 `.github/workflows/ci.yml`이 매 푸시·PR마다 ubuntu-latest/macos-latest
-매트릭스에서 shellcheck와 전체 bats 스위트를 실행합니다.
+매트릭스에서 shellcheck와 전체 bats 스위트를 실행하고, `plugin/`이
+`.claude/`의 바이트 단위 동일 복사본인지(심볼릭 링크 금지 — 네이티브
+Windows 체크아웃에서 깨짐)도 함께 검증합니다.
 
 ## 제거 방법
 

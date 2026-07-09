@@ -314,6 +314,32 @@ EOF
   [[ "$output" == *"package.json"* ]]
 }
 
+@test "evolve-gate.sh blocks under a plugin-only layout (skill beside the hook dir, no project .claude/)" {
+  PLUGIN_ROOT="$(mktemp -d)"
+  mkdir -p "$PLUGIN_ROOT/hooks" "$PLUGIN_ROOT/skills/context-evolve"
+  cp "$REPO_ROOT"/.claude/hooks/evolve-gate.sh "$REPO_ROOT"/.claude/hooks/lib-config.sh "$PLUGIN_ROOT/hooks/"
+  chmod +x "$PLUGIN_ROOT/hooks/"*.sh
+  echo "ok" > "$PLUGIN_ROOT/skills/context-evolve/SKILL.md"
+  rm -rf .claude   # 플러그인 단독 설치: 프로젝트에 .claude/가 없다
+  seed_signals
+  echo '{"stop_hook_active": false, "session_id": "plugin-sess"}' > input.json
+  run "$PLUGIN_ROOT/hooks/evolve-gate.sh" < input.json
+  [ "$status" -eq 2 ]
+  [ -f .cursor-context/.gate-fired-plugin-sess ]
+}
+
+@test "metrics-collector.sh logs under a plugin-only layout (no project .claude/)" {
+  PLUGIN_ROOT="$(mktemp -d)"
+  mkdir -p "$PLUGIN_ROOT/hooks"
+  cp "$REPO_ROOT"/.claude/hooks/metrics-collector.sh "$PLUGIN_ROOT/hooks/"
+  chmod +x "$PLUGIN_ROOT/hooks/"*.sh
+  rm -rf .claude   # 플러그인 단독 설치: 프로젝트에 .claude/가 없다
+  echo '{"tool_name":"Read","tool_input":{"file_path":"foo.txt"}}' > input.json
+  run "$PLUGIN_ROOT/hooks/metrics-collector.sh" < input.json
+  [ "$status" -eq 0 ]
+  grep -q '"path": "foo.txt"' .cursor-context/metrics.jsonl
+}
+
 @test "session-context.sh honors COMMIT_BACKSTOP from config" {
   echo "LANG=ko
 COMMIT_BACKSTOP=2" > .cursor-context/config

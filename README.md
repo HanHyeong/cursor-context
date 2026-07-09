@@ -315,7 +315,9 @@ bats tests/*.bats
   injection behavior can only be observed in a real Claude Code session)
 
 CI (`.github/workflows/ci.yml`) runs shellcheck and the full bats suite on an
-ubuntu-latest/macos-latest matrix on every push and PR.
+ubuntu-latest/macos-latest matrix on every push and PR, and verifies that
+`plugin/` is a byte-identical mirror of `.claude/` (real file copies, no
+symlinks — symlinks break on native-Windows checkouts).
 
 ## Safety guarantees
 
