@@ -65,6 +65,17 @@ make_nopython_path() {
   [ -f "$TARGET/.claude/settings.json" ]
   run python3 -c "import json; json.load(open('$TARGET/.claude/settings.json'))"
   [ "$status" -eq 0 ]
+  # 스킬이 게이트 스크립트를 Bash 도구로 실행할 수 있게 하는 허용 규칙 —
+  # 없으면 권한이 막힌 세션에서 context-evolve가 스킵되어 Stop 게이트가
+  # 새 세션마다 반복 발동한다.
+  run python3 -c "
+import json
+d = json.load(open('$TARGET/.claude/settings.json'))
+assert 'Bash(.claude/hooks/*)' in d['permissions']['allow']
+print('ok')
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok"* ]]
 }
 
 @test "re-running install.sh is idempotent: no diffs, no backups, no changes reported" {
@@ -83,6 +94,7 @@ make_nopython_path() {
   cat > "$TARGET/.claude/settings.json" << 'JSON'
 {
   "customKey": "keep-me",
+  "permissions": { "allow": [ "Bash(npm test)" ] },
   "hooks": {
     "PreToolUse": [
       { "hooks": [ { "type": "command", "command": "echo custom-hook" } ] }
@@ -103,6 +115,8 @@ assert any('session-context.sh' in h['command'] for m in d['hooks']['SessionStar
 assert any('evolve-gate.sh' in h['command'] for m in d['hooks']['Stop'] for h in m['hooks'])
 assert any('prompt-freshness.sh' in h['command'] for m in d['hooks']['UserPromptSubmit'] for h in m['hooks'])
 assert any('metrics-collector.sh' in h['command'] for m in d['hooks']['PostToolUse'] for h in m['hooks'])
+assert 'Bash(npm test)' in d['permissions']['allow']
+assert 'Bash(.claude/hooks/*)' in d['permissions']['allow']
 print('ok')
 "
   [ "$status" -eq 0 ]
@@ -217,13 +231,14 @@ FEEDBACK_THRESHOLD=42" > "$TARGET/.cursor-context/config"
   [ "$found_hook_backup" -ge 1 ]
   found_skill_backup=$(find "$TARGET/.claude/backup" -path "*/uninstall-*/skills/project-onboard" 2>/dev/null | wc -l | tr -d ' ')
   [ "$found_skill_backup" -ge 1 ]
-  # settings.json: our 4 hook entries gone, file still valid JSON
+  # settings.json: our 4 hook entries and permission rule gone, file still valid JSON
   run python3 -c "
 import json
 d = json.load(open('$TARGET/.claude/settings.json'))
 h = d.get('hooks', {})
 assert not any('session-context.sh' in hk.get('command','') for m in h.get('SessionStart', []) for hk in m.get('hooks', []))
 assert not any('evolve-gate.sh' in hk.get('command','') for m in h.get('Stop', []) for hk in m.get('hooks', []))
+assert 'Bash(.claude/hooks/*)' not in d.get('permissions', {}).get('allow', [])
 print('ok')
 "
   [ "$status" -eq 0 ]
@@ -249,6 +264,29 @@ import json
 d = json.load(open('$TARGET/.claude/settings.json'))
 assert any(hk.get('command') == 'echo my-own-hook' for m in d['hooks'].get('PostToolUse', []) for hk in m.get('hooks', []))
 assert not any('metrics-collector.sh' in hk.get('command','') for m in d['hooks'].get('PostToolUse', []) for hk in m.get('hooks', []))
+print('ok')
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok"* ]]
+}
+
+@test "--uninstall removes only our permission rule, preserving the user's own allow entries" {
+  "$REPO_ROOT/install.sh" "$TARGET" --no-onboard >/dev/null
+  python3 -c "
+import json
+p = '$TARGET/.claude/settings.json'
+d = json.load(open(p))
+d['permissions']['allow'].append('Bash(git ls-remote *)')
+json.dump(d, open(p, 'w'), indent=2)
+"
+  run "$REPO_ROOT/install.sh" "$TARGET" --uninstall
+  [ "$status" -eq 0 ]
+  run python3 -c "
+import json
+d = json.load(open('$TARGET/.claude/settings.json'))
+allow = d.get('permissions', {}).get('allow', [])
+assert 'Bash(git ls-remote *)' in allow
+assert 'Bash(.claude/hooks/*)' not in allow
 print('ok')
 "
   [ "$status" -eq 0 ]
