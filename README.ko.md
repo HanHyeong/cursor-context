@@ -52,7 +52,7 @@
 
 ```
 .claude/                               # 코드 계층 (진화 대상 아님)
-├── settings.json                      # 훅 4종 등록
+├── settings.json                      # 훅 4종 등록 + Bash(.claude/hooks/*) 허용 규칙
 ├── hooks/
 │   ├── session-context.sh             # 세션 시작: 스냅샷 주입 + 신선도 검사
 │   ├── prompt-freshness.sh            # 매 프롬프트: 지문 재검사 (일치하면 침묵)
@@ -179,9 +179,13 @@ cd cursor-context
 
 **설치는 비파괴적이며 병합까지 자동입니다** — 기존 환경에 영향을 주지 않습니다:
 
-- 기존 `settings.json`이 있으면 **hooks 배열에만 자동으로 추가 병합**합니다
-  (기존 키·훅의 의미 전부 보존, 병합 전 원본 백업, 재실행 시 중복 등록 없음.
-  단, JSON 재직렬화로 들여쓰기 등 포맷은 정리될 수 있습니다).
+- 기존 `settings.json`이 있으면 **hooks 배열과 permissions.allow에만 자동으로
+  추가 병합**합니다 — 허용 규칙 `Bash(.claude/hooks/*)`은 스킬이 게이트
+  스크립트(context-benchmark.sh 등)를 Bash 도구로 권한 프롬프트 없이 실행하기
+  위해 필요합니다. 이 규칙이 없으면 권한이 허용되지 않은 세션에서 진화가
+  조용히 스킵되어 Stop 게이트가 새 세션마다 반복 발동합니다.
+  (기존 키·훅·허용 항목의 의미 전부 보존, 병합 전 원본 백업, 재실행 시 중복
+  등록 없음. 단, JSON 재직렬화로 들여쓰기 등 포맷은 정리될 수 있습니다).
   훅 등록은 배열 추가 방식이라 **기존 훅은 그대로 함께 실행**됩니다.
   python3가 없거나 JSON이 손상된 경우에만 원본을 건드리지 않고 병합용
   예시 파일 제공으로 폴백합니다
@@ -230,7 +234,8 @@ cd cursor-context
 
 `.claude/` 디렉터리를 대상 프로젝트 루트에 복사하고
 `chmod +x .claude/hooks/*.sh` 후 Claude Code를 재시작하면 됩니다.
-기존 `.claude/settings.json`이 있다면 `hooks` 섹션만 병합하세요
+기존 `.claude/settings.json`이 있다면 `hooks` 섹션과 `permissions.allow`의
+`Bash(.claude/hooks/*)` 규칙을 병합하세요
 (배열에 추가하는 방식이라 기존 훅은 그대로 함께 실행됩니다).
 
 ### 플러그인 설치 (대안)
@@ -350,7 +355,8 @@ Windows 체크아웃에서 깨짐)도 함께 검증합니다.
 ```
 
 이 툴킷의 훅·스킬을 제거하고, `.claude/settings.json`에서도 이 툴킷이 등록한
-훅 4종만 골라 제거합니다 — 같은 이벤트에 등록된 다른 훅은 그대로 남습니다.
+훅 4종과 `Bash(.claude/hooks/*)` 허용 규칙만 골라 제거합니다 — 같은 이벤트에
+등록된 다른 훅이나 사용자의 다른 allow 항목은 그대로 남습니다.
 아무것도 완전히 삭제하지 않고 먼저 `.claude/backup/uninstall-<timestamp>/`로
 옮긴 뒤 제거하므로 언제든 되돌릴 수 있습니다. `.cursor-context/`(생성된 문서와
 메트릭 데이터)는 기본적으로 보존되며, 이것까지 지우려면 `--purge-data`를

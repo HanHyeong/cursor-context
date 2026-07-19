@@ -10,7 +10,10 @@
 #                     quality gate) + a shared config loader (lib-config.sh;
 #                     not a hook itself, but the hooks source it)
 #   .claude/skills/ — 3 skills: project-onboard, context-refresh, context-evolve
-#   .claude/settings.json — registers 4 hooks (auto-merged if a file already exists)
+#   .claude/settings.json — registers 4 hooks + a permissions.allow rule
+#                     Bash(.claude/hooks/*) so skills can run the gate scripts
+#                     via the Bash tool without a permission prompt
+#                     (auto-merged if a file already exists)
 #   (machine-generated data is created under .cursor-context/ at runtime)
 #
 # Non-destructive principles / 비파괴 원칙:
@@ -79,18 +82,18 @@ MSG_en_skill_installed="Installed .claude/skills/%s"
 MSG_ko_skill_installed="✓ .claude/skills/%s"
 MSG_en_settings_fallback="Cannot auto-merge settings.json (%s). The existing file was left untouched."
 MSG_ko_settings_fallback="settings.json 자동 병합 불가(%s). 기존 파일은 건드리지 않았습니다."
-MSG_en_settings_fallback_howto="   Add the hooks entries from .claude/settings.hooks-example.json into your existing file's hooks (append, don't replace)."
-MSG_ko_settings_fallback_howto="   .claude/settings.hooks-example.json의 hooks 항목을 기존 파일의 hooks에 '추가'하세요."
+MSG_en_settings_fallback_howto="   Add the hooks entries and the permissions.allow rule from .claude/settings.hooks-example.json into your existing file (append, don't replace)."
+MSG_ko_settings_fallback_howto="   .claude/settings.hooks-example.json의 hooks 항목과 permissions.allow 규칙을 기존 파일에 '추가'하세요."
 MSG_en_settings_fallback_note="   Hooks are appended to arrays, so your existing hooks keep working alongside them."
 MSG_ko_settings_fallback_note="   훅은 배열에 추가하는 방식이라 기존 훅은 그대로 유지되고 함께 실행됩니다."
-MSG_en_settings_fresh="Installed .claude/settings.json (registered 4 hooks: SessionStart, UserPromptSubmit, Stop, PostToolUse)"
-MSG_ko_settings_fresh="✓ .claude/settings.json (훅 4종 등록: SessionStart, UserPromptSubmit, Stop, PostToolUse)"
+MSG_en_settings_fresh="Installed .claude/settings.json (registered 4 hooks: SessionStart, UserPromptSubmit, Stop, PostToolUse + permission rule Bash(.claude/hooks/*) so skills can run the gate scripts)"
+MSG_ko_settings_fresh="✓ .claude/settings.json (훅 4종 등록: SessionStart, UserPromptSubmit, Stop, PostToolUse + 스킬이 게이트 스크립트를 실행할 수 있게 Bash(.claude/hooks/*) 허용 규칙 추가)"
 MSG_en_settings_identical="✓ .claude/settings.json (identical to existing -- no change)"
 MSG_ko_settings_identical="✓ .claude/settings.json (기존과 동일 — 변경 없음)"
 MSG_en_settings_already="✓ .claude/settings.json (hooks already registered -- no change)"
 MSG_ko_settings_already="✓ .claude/settings.json (훅 이미 등록됨 — 변경 없음)"
-MSG_en_settings_merged="✓ .claude/settings.json (existing config semantics preserved, hooks appended -- JSON formatting may be reordered; original backed up to %s)"
-MSG_ko_settings_merged="✓ .claude/settings.json (기존 설정 의미 보존, 훅만 자동 추가 — JSON 포맷은 재정렬될 수 있으며 원본은 %s 에 백업됨)"
+MSG_en_settings_merged="✓ .claude/settings.json (existing config semantics preserved, hooks + hook-script permission rule appended -- JSON formatting may be reordered; original backed up to %s)"
+MSG_ko_settings_merged="✓ .claude/settings.json (기존 설정 의미 보존, 훅과 훅 스크립트 허용 규칙만 자동 추가 — JSON 포맷은 재정렬될 수 있으며 원본은 %s 에 백업됨)"
 MSG_en_python3_missing="python3 missing"
 MSG_ko_python3_missing="python3 없음"
 MSG_en_merge_failed="merge failed, original restored"
@@ -131,14 +134,14 @@ MSG_en_uninstall_hook_removed="Removed .claude/hooks/%s (backed up to %s)"
 MSG_ko_uninstall_hook_removed="✓ .claude/hooks/%s 제거 (백업: %s)"
 MSG_en_uninstall_skill_removed="Removed .claude/skills/%s (backed up to %s)"
 MSG_ko_uninstall_skill_removed="✓ .claude/skills/%s 제거 (백업: %s)"
-MSG_en_uninstall_settings_removed="✓ .claude/settings.json (removed this toolkit's hook entries only -- your other hooks/settings are untouched; original backed up to %s)"
-MSG_ko_uninstall_settings_removed="✓ .claude/settings.json (이 툴킷의 훅 등록만 제거, 다른 훅·설정은 그대로 유지; 원본 백업: %s)"
+MSG_en_uninstall_settings_removed="✓ .claude/settings.json (removed this toolkit's hook entries and its Bash(.claude/hooks/*) permission rule only -- your other hooks/settings are untouched; original backed up to %s)"
+MSG_ko_uninstall_settings_removed="✓ .claude/settings.json (이 툴킷의 훅 등록과 Bash(.claude/hooks/*) 허용 규칙만 제거, 다른 훅·설정은 그대로 유지; 원본 백업: %s)"
 MSG_en_uninstall_settings_none="✓ .claude/settings.json (no hook entries from this toolkit were found -- no change)"
 MSG_ko_uninstall_settings_none="✓ .claude/settings.json (이 툴킷의 훅 등록이 없음 — 변경 없음)"
 MSG_en_uninstall_settings_missing="No .claude/settings.json found -- nothing to remove there."
 MSG_ko_uninstall_settings_missing=".claude/settings.json이 없습니다 — 제거할 것이 없습니다."
-MSG_en_uninstall_settings_manual="Cannot auto-remove hook entries (%s). Manually remove any hooks entries referencing session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh from .claude/settings.json."
-MSG_ko_uninstall_settings_manual="훅 등록 자동 제거 불가(%s). .claude/settings.json에서 session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh를 참조하는 훅 항목을 직접 제거하세요."
+MSG_en_uninstall_settings_manual="Cannot auto-remove hook entries (%s). Manually remove any hooks entries referencing session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh, and the permissions.allow entry Bash(.claude/hooks/*), from .claude/settings.json."
+MSG_ko_uninstall_settings_manual="훅 등록 자동 제거 불가(%s). .claude/settings.json에서 session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh를 참조하는 훅 항목과 permissions.allow의 Bash(.claude/hooks/*) 항목을 직접 제거하세요."
 MSG_en_uninstall_data_kept="✓ .cursor-context/ left in place. Re-run with --purge-data to remove it too, or delete it manually."
 MSG_ko_uninstall_data_kept="✓ .cursor-context/ 는 그대로 둡니다. 지우려면 --purge-data로 다시 실행하거나 직접 삭제하세요."
 MSG_en_uninstall_data_purged="Removed .cursor-context/ (--purge-data)."
@@ -165,8 +168,9 @@ msg() {
 msgf() { printf -- "$(msg "$1")\n" "${@:2}"; }
 
 # --uninstall 전용: settings.json의 hooks 배열에서 '이 툴킷이 등록한 항목만'
-# 골라서 제거한다. 같은 이벤트에 사용자가 추가한 다른 훅이 섞여 있어도
-# 그 항목은 그대로 남긴다 (merge_py의 반대 방향 연산).
+# 골라서 제거하고, 설치 때 추가한 permissions.allow의 Bash(.claude/hooks/*)
+# 규칙도 함께 제거한다. 같은 이벤트에 사용자가 추가한 다른 훅이나 사용자의
+# 다른 allow 항목은 그대로 남긴다 (merge_py의 반대 방향 연산).
 unmerge_py() {
   python3 - "$TARGET/.claude/settings.json" "$1" <<'PY'
 import json, sys
@@ -174,39 +178,50 @@ path, mode = sys.argv[1], sys.argv[2]
 d = json.load(open(path))
 if not isinstance(d, dict):
     sys.exit(1)
-h = d.get("hooks")
-if not isinstance(h, dict):
-    print("none")
-    sys.exit(0)
-
-OURS = ("session-context.sh", "prompt-freshness.sh", "evolve-gate.sh", "metrics-collector.sh")
 
 changed = False
-for event in list(h.keys()):
-    entries = h.get(event)
-    if not isinstance(entries, list):
-        continue
-    kept_entries = []
-    for entry in entries:
-        hooks_list = entry.get("hooks") if isinstance(entry, dict) else None
-        if not isinstance(hooks_list, list):
-            kept_entries.append(entry)
-            continue
-        kept_hooks = [hk for hk in hooks_list if not any(s in str(hk.get("command", "")) for s in OURS)]
-        if len(kept_hooks) != len(hooks_list):
-            changed = True
-        if kept_hooks:
-            entry = dict(entry)
-            entry["hooks"] = kept_hooks
-            kept_entries.append(entry)
-    if kept_entries:
-        h[event] = kept_entries
-    else:
-        if event in h:
-            del h[event]
 
-if not h:
-    d.pop("hooks", None)
+OURS = ("session-context.sh", "prompt-freshness.sh", "evolve-gate.sh", "metrics-collector.sh")
+h = d.get("hooks")
+if isinstance(h, dict):
+    for event in list(h.keys()):
+        entries = h.get(event)
+        if not isinstance(entries, list):
+            continue
+        kept_entries = []
+        for entry in entries:
+            hooks_list = entry.get("hooks") if isinstance(entry, dict) else None
+            if not isinstance(hooks_list, list):
+                kept_entries.append(entry)
+                continue
+            kept_hooks = [hk for hk in hooks_list if not any(s in str(hk.get("command", "")) for s in OURS)]
+            if len(kept_hooks) != len(hooks_list):
+                changed = True
+            if kept_hooks:
+                entry = dict(entry)
+                entry["hooks"] = kept_hooks
+                kept_entries.append(entry)
+        if kept_entries:
+            h[event] = kept_entries
+        else:
+            if event in h:
+                del h[event]
+    if not h:
+        d.pop("hooks", None)
+
+# 설치 때 추가한 허용 규칙 제거. 정확히 이 문자열 하나만 지우고, 사용자가
+# 직접 추가한 다른 allow 항목은 보존한다. 비우고 나면 빈 컨테이너도 정리.
+PERM = "Bash(.claude/hooks/*)"
+perms = d.get("permissions")
+if isinstance(perms, dict):
+    allow = perms.get("allow")
+    if isinstance(allow, list) and PERM in allow:
+        allow[:] = [a for a in allow if a != PERM]
+        changed = True
+        if not allow:
+            perms.pop("allow", None)
+        if not perms:
+            d.pop("permissions", None)
 
 if mode == "check":
     print("removable" if changed else "none")
@@ -385,10 +400,11 @@ for s in project-onboard context-refresh context-evolve; do
   msgf skill_installed "$s"
 done
 
-# settings.json 훅 등록:
+# settings.json 훅 등록 + Bash(.claude/hooks/*) 허용 규칙:
 #   - 파일 없음 → 우리 설정 설치
-#   - 파일 있음 → python3로 hooks 배열에만 '추가' 병합 (기존 키·훅 전부 보존,
-#     이미 등록돼 있으면 무변경, 병합 전 원본 백업)
+#   - 파일 있음 → python3로 hooks 배열과 permissions.allow에만 '추가' 병합
+#     (기존 키·훅·허용 항목 전부 보존, 이미 등록돼 있으면 무변경, 병합 전
+#     원본 백업)
 #   - python3 없음 / JSON 파싱 실패 → 예시 파일 제공으로 폴백 (원본 불가침)
 merge_py() {
   python3 - "$TARGET/.claude/settings.json" "$1" <<'PY'
@@ -437,6 +453,20 @@ if not registered("PostToolUse", "metrics-collector.sh"):
                    "command": 'bash -c "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/metrics-collector.sh"',
                    "timeout": 10}]})
     changed = True
+
+# Bash(.claude/hooks/*) 허용 규칙: 훅 자체는 권한 검사 없이 실행되지만,
+# context-evolve 스킬은 Claude가 'Bash 도구로' context-benchmark.sh를 직접
+# 실행해야 하고 이는 권한 게이트에 걸린다. 이 규칙이 없으면 권한이 허용되지
+# 않은 세션에서 진화가 조용히 스킵되고, 신호가 소진되지 않아 Stop 게이트가
+# 새 세션마다 반복 발동한다. permissions/allow가 dict/list가 아닌 비정상
+# 형태면 건드리지 않는다 (사용자 설정 불가침 원칙).
+PERM = "Bash(.claude/hooks/*)"
+perms = d.setdefault("permissions", {})
+if isinstance(perms, dict):
+    allow = perms.setdefault("allow", [])
+    if isinstance(allow, list) and PERM not in allow:
+        allow.append(PERM)
+        changed = True
 
 if mode == "check":
     print("mergeable" if changed else "already")

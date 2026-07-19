@@ -84,15 +84,21 @@ That's it. Restart Claude Code in your project — everything else is automatic.
 ### Installation details
 
 `install.sh <target>` copies six hook scripts and three skills into the
-target's `.claude/` directory and registers four hooks (SessionStart,
-UserPromptSubmit, Stop, PostToolUse). Machine-generated data lives in
+target's `.claude/` directory, registers four hooks (SessionStart,
+UserPromptSubmit, Stop, PostToolUse), and adds one `permissions.allow` rule —
+`Bash(.claude/hooks/*)` — so the skills can run the gate scripts (e.g.
+`context-benchmark.sh`) through the Bash tool without a permission prompt.
+Without that rule, sessions that never granted the permission silently skip
+evolution, signals are never consumed, and the Stop gate re-fires every new
+session. Machine-generated data lives in
 `.cursor-context/` at the project root — deliberately outside `.claude/`,
 because Claude Code protects writes under `.claude/` and keeping data there
 would require an approval for every automatic update, breaking zero-touch. It is **non-destructive
 and idempotent**:
 
 - An existing `settings.json` is never overwritten. Hook entries are
-  **appended** to its `hooks` arrays via python3 (all your keys and hooks are
+  **appended** to its `hooks` arrays and the permission rule to
+  `permissions.allow` via python3 (all your keys, hooks, and allow entries are
   preserved and keep running; JSON semantics preserved, though indentation may
   be reformatted; the original is backed up first). If python3 is missing or
   the JSON is malformed, your file is left untouched and a
@@ -104,9 +110,9 @@ and idempotent**:
   (no duplicate hook entries, no backup clutter).
 
 Manual install: copy `.claude/` into your project root,
-`chmod +x .claude/hooks/*.sh`, and merge the `hooks` block of
-`settings.json` into yours (append to the arrays — additive, existing hooks
-keep working).
+`chmod +x .claude/hooks/*.sh`, and merge the `hooks` block and the
+`permissions.allow` rule of `settings.json` into yours (append to the
+arrays — additive, existing hooks keep working).
 
 ### Plugin install (alternative)
 
@@ -262,8 +268,9 @@ human decision. Evolution history lives in `.cursor-context/evolve-log.jsonl`.
 ```
 
 This removes the toolkit's hooks and skills, and strips only this toolkit's
-four hook entries out of `.claude/settings.json` — any other hooks you've
-registered in the same events are left alone. Nothing is deleted outright:
+four hook entries and its `Bash(.claude/hooks/*)` permission rule out of
+`.claude/settings.json` — any other hooks or allow entries you've
+registered are left alone. Nothing is deleted outright:
 everything removed is moved to `.claude/backup/uninstall-<timestamp>/` first,
 so an uninstall is always reversible. `.cursor-context/` (the generated doc
 and metrics data) is kept by default; add `--purge-data` to remove that too.
