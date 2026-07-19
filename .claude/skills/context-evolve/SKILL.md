@@ -46,11 +46,14 @@ config가 없거나 `LANG=ko`면 한국어로 작성한다.
 
 ```bash
 cat .cursor-context/context-feedback.jsonl 2>/dev/null   # {"type":"wrong|gap","area":...,"note":...}
-cat .cursor-context/metrics.jsonl 2>/dev/null             # {"tool":...,"cmd"|"path"|"pattern":...}
+<hooks>/metrics-collector.sh --digest                    # 결정론적 요약: 명령/디렉터리별 횟수 + 고유 세션 수
 ```
 
-둘 다 없거나 비어 있으면 "진화에 쓸 신호가 없습니다"라고 보고하고 끝낸다.
-억지로 고치지 마라 — 신호 없는 변이는 개악이다.
+metrics는 반드시 `--digest` 요약으로 읽는다 — 원본(metrics.jsonl)은 수천
+줄일 수 있고, 집계를 모델이 직접 하면 부정확하다. 다이제스트만으로 판단이
+어려운 특정 항목이 있을 때만 원본을 grep으로 좁혀 부분 확인한다(전체 cat
+금지). 피드백도 다이제스트도 비어 있으면 "진화에 쓸 신호가 없습니다"라고
+보고하고 끝낸다. 억지로 고치지 마라 — 신호 없는 변이는 개악이다.
 
 ### 2. 신호 분석
 

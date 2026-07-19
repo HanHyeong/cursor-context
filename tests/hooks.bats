@@ -195,6 +195,42 @@ seed_signals() {
   grep -q '"cmd": "npm test"' .cursor-context/metrics.jsonl
 }
 
+@test "metrics-collector.sh records the session id when the hook input provides one" {
+  echo '{"session_id":"sess-abc","tool_name":"Read","tool_input":{"file_path":"foo.txt"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  grep -q '"sid": "sess-abc"' .cursor-context/metrics.jsonl
+}
+
+@test "metrics-collector.sh does not log toolkit self-observation (.cursor-context targets)" {
+  rm -f .cursor-context/metrics.jsonl
+  echo '{"tool_name":"Read","tool_input":{"file_path":".cursor-context/metrics.jsonl"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  echo '{"tool_name":"Bash","tool_input":{"command":"cat .cursor-context/context-feedback.jsonl"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  [ ! -f .cursor-context/metrics.jsonl ]
+}
+
+@test "metrics-collector.sh --digest aggregates hits and distinct sessions deterministically" {
+  cat > .cursor-context/metrics.jsonl <<'EOF'
+{"ts": 100, "tool": "Read", "sid": "s1", "path": "/p/src/a.js"}
+{"ts": 200, "tool": "Read", "sid": "s2", "path": "/p/src/b.js"}
+{"ts": 300, "tool": "Bash", "sid": "s1", "cmd": "npm test --silent"}
+{"ts": 400, "tool": "Bash", "sid": "s2", "cmd": "npm test"}
+{"ts": 500, "tool": "Grep", "sid": "s1", "pattern": "foo", "path": "src"}
+not-json-garbage-line
+EOF
+  run .claude/hooks/metrics-collector.sh --digest
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"5 entries, 2 sessions"* ]]
+  # npm test: 2회 실행, 서로 다른 세션 2개 / /p/src: Read 2회, 세션 2개
+  echo "$output" | grep -qE '^ +2 +2 +npm test$'
+  echo "$output" | grep -qE '^ +2 +2 +/p/src$'
+  echo "$output" | grep -qE '^ +1 +1 +src$'
+}
+
 @test "metrics-collector.sh redacts credential-shaped values in logged Bash commands" {
   echo '{"tool_name":"Bash","tool_input":{"command":"curl -H \"Authorization: Bearer abc123xyz\" --api-key=SUPERSECRET https://example.com && export DB_PASSWORD=hunter2 && npm test"}}' > input.json
   run .claude/hooks/metrics-collector.sh < input.json
