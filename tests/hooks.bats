@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # session-context.sh(SessionStart), prompt-freshness.sh(UserPromptSubmit),
-# evolve-gate.sh(Stop), metrics-collector.sh(PostToolUse) 검증.
+# evolve-gate.sh(Stop), metrics-collector.sh(PostToolUse),
+# permission-gate.sh(PreToolUse) 검증.
 
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
@@ -448,4 +449,90 @@ COMMIT_BACKSTOP=2" > .cursor-context/config
   # 기본값(20)이라면 커밋 3개로는 백스톱이 걸리지 않았을 것 — COMMIT_BACKSTOP=2로
   # 낮췄으니 커밋이 3개 쌓인 지금 백스톱 안내가 떠야 한다.
   [[ "$output" == *"문서 생성 후 커밋이 3개 쌓였습니다"* ]]
+}
+
+# ---------------------------------------------------------------
+# permission-gate.sh (PreToolUse, matcher: Bash)
+# ---------------------------------------------------------------
+
+@test "permission-gate.sh allows a bare invocation of its own gate script via .claude/hooks/ relative path" {
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-benchmark.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+}
+
+@test "permission-gate.sh allows the digest/fingerprint scripts with simple trailing arguments" {
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/metrics-collector.sh --digest"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-fingerprint.sh --changed doc.md"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+}
+
+@test "permission-gate.sh allows the absolute HOOK_DIR-anchored form (plugin layout simulation)" {
+  # 플러그인 배치를 흉내낸다: 훅이 .claude/hooks가 아닌 임의의 디렉터리에
+  # 있고, 명령이 그 절대경로를 그대로 쓴다.
+  PLUGIN_DIR="$(mktemp -d)/hooks"
+  mkdir -p "$PLUGIN_DIR"
+  cp "$REPO_ROOT"/.claude/hooks/permission-gate.sh "$PLUGIN_DIR/"
+  chmod +x "$PLUGIN_DIR"/*.sh
+  echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$PLUGIN_DIR/context-benchmark.sh\"}}" > input.json
+  run "$PLUGIN_DIR/permission-gate.sh" < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+  # 플러그인 배치에서는 install.sh 배치용 상대경로(.claude/hooks/...)는
+  # 인정하지 않는다 — HOOK_DIR이 .claude/hooks로 끝나지 않기 때문이다.
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-benchmark.sh"}}' > input.json
+  run "$PLUGIN_DIR/permission-gate.sh" < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh never allows when the command contains shell metacharacters" {
+  for cmd in \
+    '.claude/hooks/context-benchmark.sh; rm -rf ~' \
+    '.claude/hooks/context-benchmark.sh && rm -rf ~' \
+    '.claude/hooks/context-benchmark.sh | cat' \
+    '.claude/hooks/context-benchmark.sh $(whoami)' \
+    '.claude/hooks/context-benchmark.sh `whoami`' \
+    '.claude/hooks/context-benchmark.sh > /etc/passwd'
+  do
+    printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$cmd")" > input.json
+    run .claude/hooks/permission-gate.sh < input.json
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "permission-gate.sh never allows a script outside its own hook directory" {
+  echo '{"tool_name":"Bash","tool_input":{"command":"/tmp/evil/context-benchmark.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh never allows a script it does not recognize by name" {
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/session-context.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh ignores non-Bash tool calls" {
+  echo '{"tool_name":"Read","tool_input":{"file_path":".claude/hooks/context-benchmark.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh tolerates malformed JSON input without crashing" {
+  echo 'not json at all' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }

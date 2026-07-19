@@ -83,14 +83,34 @@ That's it. Restart Claude Code in your project — everything else is automatic.
 
 ### Installation details
 
-`install.sh <target>` copies six hook scripts and three skills into the
-target's `.claude/` directory, registers four hooks (SessionStart,
-UserPromptSubmit, Stop, PostToolUse), and adds one `permissions.allow` rule —
-`Bash(.claude/hooks/*)` — so the skills can run the gate scripts (e.g.
-`context-benchmark.sh`) through the Bash tool without a permission prompt.
-Without that rule, sessions that never granted the permission silently skip
-evolution, signals are never consumed, and the Stop gate re-fires every new
-session. Machine-generated data lives in
+`install.sh <target>` copies seven hook scripts and three skills into the
+target's `.claude/` directory and registers five hooks (SessionStart,
+UserPromptSubmit, Stop, PostToolUse, PreToolUse). The skills need to run gate
+scripts (e.g. `context-benchmark.sh`) through the Bash tool, which is
+permission-gated like any other Bash command — without a way around that,
+sessions that never granted the permission would silently skip evolution,
+signals would never be consumed, and the Stop gate would re-fire every new
+session. Two mechanisms close that gap, in order of precedence:
+
+1. **`permission-gate.sh` (PreToolUse hook, primary)** — runs before the
+   permission system on every Bash call and auto-approves *only* a bare
+   invocation of the toolkit's own gate/fingerprint/digest scripts (no
+   chaining, substitution, or redirection allowed in the command — anything
+   else falls through to the normal prompt). This is deterministic code, not
+   a static string match, so it isn't fooled by how the command text is
+   written, and — because hooks run without permission checks regardless of
+   install method — it works identically under the plugin layout too, where
+   a `permissions.allow` rule cannot be declared at all (plugin manifests
+   have no permissions field).
+2. **`permissions.allow: Bash(.claude/hooks/*)` (install.sh layout only)** —
+   a static settings.json rule kept as a secondary net for anything the gate
+   hook doesn't cover. It only matches the literal command prefix, with no
+   variable-expansion awareness, so a skill invoking a hook script through a
+   shell variable (e.g. `"$SOME_VAR"/context-benchmark.sh`) would silently
+   defeat it — the skills in this toolkit are written to always use the
+   literal path for exactly this reason.
+
+Machine-generated data lives in
 `.cursor-context/` at the project root — deliberately outside `.claude/`,
 because Claude Code protects writes under `.claude/` and keeping data there
 would require an approval for every automatic update, breaking zero-touch. It is **non-destructive
@@ -129,6 +149,12 @@ addressed by `${CLAUDE_PLUGIN_ROOT}` instead of
 `${CLAUDE_PROJECT_DIR}/.claude`. Machine-generated data still lands in
 `.cursor-context/` at your project root either way — a plugin install is not
 project-scoped storage, so this keeps the two distributions interchangeable.
+This includes frictionless gate-script execution: plugin manifests cannot
+declare a `permissions.allow` rule (there's no such field), but the
+`permission-gate.sh` PreToolUse hook works identically under either install
+method since hooks bypass permission checks regardless of how they're
+registered — so the plugin path gets the same prompt-free evolution loop as
+`install.sh`, just via mechanism (1) above instead of both (1) and (2).
 Both installation methods are maintained side by side for now; `install.sh`
 will be marked deprecated only after the plugin path has had a release or two
 to prove out.
@@ -268,7 +294,7 @@ human decision. Evolution history lives in `.cursor-context/evolve-log.jsonl`.
 ```
 
 This removes the toolkit's hooks and skills, and strips only this toolkit's
-four hook entries and its `Bash(.claude/hooks/*)` permission rule out of
+five hook entries and its `Bash(.claude/hooks/*)` permission rule out of
 `.claude/settings.json` — any other hooks or allow entries you've
 registered are left alone. Nothing is deleted outright:
 everything removed is moved to `.claude/backup/uninstall-<timestamp>/` first,
@@ -283,11 +309,14 @@ Manual removal (equivalent, if you'd rather not use the script):
 ```bash
 rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
    .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
-   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh .claude/hooks/lib-config.sh
+   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh \
+   .claude/hooks/permission-gate.sh .claude/hooks/lib-config.sh
 rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
 rm -rf .cursor-context
-# then remove the four hook entries (session-context.sh / prompt-freshness.sh /
-# metrics-collector.sh / evolve-gate.sh) from the hooks arrays in .claude/settings.json
+# then remove the five hook entries (session-context.sh / prompt-freshness.sh /
+# metrics-collector.sh / evolve-gate.sh / permission-gate.sh) from the hooks
+# arrays, and the Bash(.claude/hooks/*) entry from permissions.allow, in
+# .claude/settings.json
 ```
 
 ### Troubleshooting
@@ -325,13 +354,18 @@ wrapper so variable expansion works even when hooks are spawned via cmd. Run
 |---|---|---|
 | Session-start hook | 146 ms | 183 ms |
 | Per-prompt hook | 26 ms | 42 ms |
-| PostToolUse hook (metrics) | ~14 ms/call | same order |
+| PreToolUse hook (permission gate, Bash calls only) | ~30 ms/call | same order |
+| PostToolUse hook (metrics) | ~30–40 ms/call | same order |
 | Session token cost | ~600–800 tokens + doc (≤250 lines) | same order |
 | Per-prompt token cost | **0 when nothing changed** | **0** |
 
 Scaling is dominated by `git ls-files`, so even 50k-file monorepos stay well
-under a second. The metrics hook's ~14 ms is dominated by `python3` process
-startup, not I/O — at the 2,000-line rotation cap, reading the whole log adds
+under a second. Both per-tool-call hooks' cost is dominated by `python3`
+process startup, not their own logic — a Bash tool call now pays two
+startups (PreToolUse gate + PostToolUse metrics) where before it paid one;
+Read/Grep/Glob calls still pay only the PostToolUse one, since the
+permission gate only runs its Python path for the Bash matcher. At the
+2,000-line rotation cap, reading the whole metrics log adds
 well under 1 ms. The full-log rotation check now runs on ~1% of calls
 (probabilistic) instead of every call, which mainly reduces total I/O
 operations over a long session rather than single-call latency at this scale;

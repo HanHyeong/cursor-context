@@ -5,14 +5,21 @@
 #                ./install.sh /path/to/your/project --uninstall [--purge-data]
 #
 # Installs into the target project / 대상 프로젝트에 다음을 설치한다:
-#   .claude/hooks/  — 6 hooks (session snapshot, prompt freshness, fingerprint
+#   .claude/hooks/  — 7 hooks (session snapshot, prompt freshness, fingerprint
 #                     generator, metrics collector, evolve gate (Stop), doc
-#                     quality gate) + a shared config loader (lib-config.sh;
-#                     not a hook itself, but the hooks source it)
+#                     quality gate, permission gate (PreToolUse)) + a shared
+#                     config loader (lib-config.sh; not a hook itself, but
+#                     the hooks source it)
 #   .claude/skills/ — 3 skills: project-onboard, context-refresh, context-evolve
-#   .claude/settings.json — registers 4 hooks + a permissions.allow rule
+#   .claude/settings.json — registers 5 hooks + a permissions.allow rule
 #                     Bash(.claude/hooks/*) so skills can run the gate scripts
-#                     via the Bash tool without a permission prompt
+#                     via the Bash tool without a permission prompt. The new
+#                     PreToolUse permission-gate.sh hook is the primary,
+#                     robust mechanism (deterministic code, not a static
+#                     string-prefix match, and works under the plugin layout
+#                     too, where a settings.json permissions rule cannot be
+#                     declared at all); the static allow rule stays as a
+#                     secondary net for anything the gate hook doesn't cover
 #                     (auto-merged if a file already exists)
 #   (machine-generated data is created under .cursor-context/ at runtime)
 #
@@ -86,8 +93,8 @@ MSG_en_settings_fallback_howto="   Add the hooks entries and the permissions.all
 MSG_ko_settings_fallback_howto="   .claude/settings.hooks-example.json의 hooks 항목과 permissions.allow 규칙을 기존 파일에 '추가'하세요."
 MSG_en_settings_fallback_note="   Hooks are appended to arrays, so your existing hooks keep working alongside them."
 MSG_ko_settings_fallback_note="   훅은 배열에 추가하는 방식이라 기존 훅은 그대로 유지되고 함께 실행됩니다."
-MSG_en_settings_fresh="Installed .claude/settings.json (registered 4 hooks: SessionStart, UserPromptSubmit, Stop, PostToolUse + permission rule Bash(.claude/hooks/*) so skills can run the gate scripts)"
-MSG_ko_settings_fresh="✓ .claude/settings.json (훅 4종 등록: SessionStart, UserPromptSubmit, Stop, PostToolUse + 스킬이 게이트 스크립트를 실행할 수 있게 Bash(.claude/hooks/*) 허용 규칙 추가)"
+MSG_en_settings_fresh="Installed .claude/settings.json (registered 5 hooks: PreToolUse, SessionStart, UserPromptSubmit, Stop, PostToolUse + permission rule Bash(.claude/hooks/*) so skills can run the gate scripts)"
+MSG_ko_settings_fresh="✓ .claude/settings.json (훅 5종 등록: PreToolUse, SessionStart, UserPromptSubmit, Stop, PostToolUse + 스킬이 게이트 스크립트를 실행할 수 있게 Bash(.claude/hooks/*) 허용 규칙 추가)"
 MSG_en_settings_identical="✓ .claude/settings.json (identical to existing -- no change)"
 MSG_ko_settings_identical="✓ .claude/settings.json (기존과 동일 — 변경 없음)"
 MSG_en_settings_already="✓ .claude/settings.json (hooks already registered -- no change)"
@@ -140,8 +147,8 @@ MSG_en_uninstall_settings_none="✓ .claude/settings.json (no hook entries from 
 MSG_ko_uninstall_settings_none="✓ .claude/settings.json (이 툴킷의 훅 등록이 없음 — 변경 없음)"
 MSG_en_uninstall_settings_missing="No .claude/settings.json found -- nothing to remove there."
 MSG_ko_uninstall_settings_missing=".claude/settings.json이 없습니다 — 제거할 것이 없습니다."
-MSG_en_uninstall_settings_manual="Cannot auto-remove hook entries (%s). Manually remove any hooks entries referencing session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh, and the permissions.allow entry Bash(.claude/hooks/*), from .claude/settings.json."
-MSG_ko_uninstall_settings_manual="훅 등록 자동 제거 불가(%s). .claude/settings.json에서 session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh를 참조하는 훅 항목과 permissions.allow의 Bash(.claude/hooks/*) 항목을 직접 제거하세요."
+MSG_en_uninstall_settings_manual="Cannot auto-remove hook entries (%s). Manually remove any hooks entries referencing session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh / permission-gate.sh, and the permissions.allow entry Bash(.claude/hooks/*), from .claude/settings.json."
+MSG_ko_uninstall_settings_manual="훅 등록 자동 제거 불가(%s). .claude/settings.json에서 session-context.sh / prompt-freshness.sh / evolve-gate.sh / metrics-collector.sh / permission-gate.sh를 참조하는 훅 항목과 permissions.allow의 Bash(.claude/hooks/*) 항목을 직접 제거하세요."
 MSG_en_uninstall_data_kept="✓ .cursor-context/ left in place. Re-run with --purge-data to remove it too, or delete it manually."
 MSG_ko_uninstall_data_kept="✓ .cursor-context/ 는 그대로 둡니다. 지우려면 --purge-data로 다시 실행하거나 직접 삭제하세요."
 MSG_en_uninstall_data_purged="Removed .cursor-context/ (--purge-data)."
@@ -181,7 +188,7 @@ if not isinstance(d, dict):
 
 changed = False
 
-OURS = ("session-context.sh", "prompt-freshness.sh", "evolve-gate.sh", "metrics-collector.sh")
+OURS = ("session-context.sh", "prompt-freshness.sh", "evolve-gate.sh", "metrics-collector.sh", "permission-gate.sh")
 h = d.get("hooks")
 if isinstance(h, dict):
     for event in list(h.keys()):
@@ -256,7 +263,7 @@ do_uninstall() {
     fi
   }
 
-  for h in session-context.sh context-fingerprint.sh prompt-freshness.sh metrics-collector.sh context-benchmark.sh evolve-gate.sh lib-config.sh; do
+  for h in session-context.sh context-fingerprint.sh prompt-freshness.sh metrics-collector.sh context-benchmark.sh evolve-gate.sh permission-gate.sh lib-config.sh; do
     dst="$TARGET/.claude/hooks/$h"
     if [ -e "$dst" ]; then
       ensure_ubackup_dir
@@ -358,7 +365,7 @@ ensure_backup_dir() {
 # 훅 스크립트: 동명 파일이 있고 내용이 다르면 백업 후 교체.
 # 동명이지만 파일이 아닌 것(디렉터리 등)이 있으면 cp가 실패해 설치가 중간에
 # 중단되므로, 타입 불일치도 백업으로 옮긴 뒤 설치한다.
-for h in session-context.sh context-fingerprint.sh prompt-freshness.sh metrics-collector.sh context-benchmark.sh evolve-gate.sh lib-config.sh; do
+for h in session-context.sh context-fingerprint.sh prompt-freshness.sh metrics-collector.sh context-benchmark.sh evolve-gate.sh permission-gate.sh lib-config.sh; do
   dst="$TARGET/.claude/hooks/$h"
   if [ -e "$dst" ] && [ ! -f "$dst" ]; then
     ensure_backup_dir
@@ -453,13 +460,19 @@ if not registered("PostToolUse", "metrics-collector.sh"):
                    "command": 'bash -c "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/metrics-collector.sh"',
                    "timeout": 10}]})
     changed = True
+if not registered("PreToolUse", "permission-gate.sh"):
+    h.setdefault("PreToolUse", []).append({
+        "matcher": "Bash",
+        "hooks": [{"type": "command",
+                   "command": 'bash -c "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/permission-gate.sh"',
+                   "timeout": 10}]})
+    changed = True
 
-# Bash(.claude/hooks/*) 허용 규칙: 훅 자체는 권한 검사 없이 실행되지만,
-# context-evolve 스킬은 Claude가 'Bash 도구로' context-benchmark.sh를 직접
-# 실행해야 하고 이는 권한 게이트에 걸린다. 이 규칙이 없으면 권한이 허용되지
-# 않은 세션에서 진화가 조용히 스킵되고, 신호가 소진되지 않아 Stop 게이트가
-# 새 세션마다 반복 발동한다. permissions/allow가 dict/list가 아닌 비정상
-# 형태면 건드리지 않는다 (사용자 설정 불가침 원칙).
+# Bash(.claude/hooks/*) 허용 규칙: 위 permission-gate.sh(PreToolUse)가 이
+# 툴킷 자신의 게이트/지문/다이제스트 스크립트 단독 호출을 결정론적으로
+# 승인하는 주 방어선이고(플러그인 배치에서도 동작), 이 정적 규칙은 그
+# 훅이 다루지 않는 패턴을 위한 보조 방어선으로 유지한다. permissions/allow가
+# dict/list가 아닌 비정상 형태면 건드리지 않는다 (사용자 설정 불가침 원칙).
 PERM = "Bash(.claude/hooks/*)"
 perms = d.setdefault("permissions", {})
 if isinstance(perms, dict):

@@ -52,7 +52,7 @@
 
 ```
 .claude/                               # 코드 계층 (진화 대상 아님)
-├── settings.json                      # 훅 4종 등록 + Bash(.claude/hooks/*) 허용 규칙
+├── settings.json                      # 훅 5종 등록 + Bash(.claude/hooks/*) 허용 규칙
 ├── hooks/
 │   ├── session-context.sh             # 세션 시작: 스냅샷 주입 + 신선도 검사
 │   ├── prompt-freshness.sh            # 매 프롬프트: 지문 재검사 (일치하면 침묵)
@@ -60,6 +60,7 @@
 │   ├── metrics-collector.sh           # 도구 사용 신호 측정 (자기 평가용)
 │   ├── evolve-gate.sh                 # Stop 게이트: 신호 임계 도달 시 진화 강제
 │   ├── context-benchmark.sh           # 문서 품질 게이트 (진화 채택 심사)
+│   ├── permission-gate.sh             # PreToolUse: 게이트 스크립트 단독 호출 승인
 │   └── lib-config.sh                  # .cursor-context/config 공유 로더 (훅 아님)
 └── skills/
     ├── project-onboard/SKILL.md       # 문서 자동 생성
@@ -180,9 +181,13 @@ cd cursor-context
 **설치는 비파괴적이며 병합까지 자동입니다** — 기존 환경에 영향을 주지 않습니다:
 
 - 기존 `settings.json`이 있으면 **hooks 배열과 permissions.allow에만 자동으로
-  추가 병합**합니다 — 허용 규칙 `Bash(.claude/hooks/*)`은 스킬이 게이트
-  스크립트(context-benchmark.sh 등)를 Bash 도구로 권한 프롬프트 없이 실행하기
-  위해 필요합니다. 이 규칙이 없으면 권한이 허용되지 않은 세션에서 진화가
+  추가 병합**합니다 — 스킬이 게이트 스크립트(context-benchmark.sh 등)를
+  Bash 도구로 실행하는 것은 권한 게이트에 걸리는데, 이를 우회하는 방어선이
+  두 겹입니다: (1) `permission-gate.sh`(PreToolUse 훅) — 이 툴킷 자신의
+  게이트/지문/다이제스트 스크립트를 셸 특수문자 없이 단독 호출하는 경우만
+  결정론적으로 승인하는 주 방어선(플러그인 배치에서도 동일하게 동작), (2)
+  정적 규칙 `permissions.allow: Bash(.claude/hooks/*)` — install.sh 배치
+  전용 보조 방어선. 둘 다 없으면 권한이 허용되지 않은 세션에서 진화가
   조용히 스킵되어 Stop 게이트가 새 세션마다 반복 발동합니다.
   (기존 키·훅·허용 항목의 의미 전부 보존, 병합 전 원본 백업, 재실행 시 중복
   등록 없음. 단, JSON 재직렬화로 들여쓰기 등 포맷은 정리될 수 있습니다).
@@ -234,7 +239,8 @@ cd cursor-context
 
 `.claude/` 디렉터리를 대상 프로젝트 루트에 복사하고
 `chmod +x .claude/hooks/*.sh` 후 Claude Code를 재시작하면 됩니다.
-기존 `.claude/settings.json`이 있다면 `hooks` 섹션과 `permissions.allow`의
+기존 `.claude/settings.json`이 있다면 `hooks` 섹션(PreToolUse의
+permission-gate.sh 포함)과 `permissions.allow`의
 `Bash(.claude/hooks/*)` 규칙을 병합하세요
 (배열에 추가하는 방식이라 기존 훅은 그대로 함께 실행됩니다).
 
@@ -253,9 +259,13 @@ cd cursor-context
 `${CLAUDE_PROJECT_DIR}/.claude` 대신 `${CLAUDE_PLUGIN_ROOT}`를 씁니다.
 기계 생성 데이터는 이 경우에도 프로젝트 루트의 `.cursor-context/`에
 그대로 쌓입니다 — 플러그인이라고 별도 저장 위치를 쓰지 않으므로 두 설치
-방식을 자유롭게 오갈 수 있습니다. 두 방식은 당분간 함께 유지되며,
-`install.sh`는 플러그인 방식이 한두 릴리스 정도 검증된 뒤에야 폐기 절차를
-밟습니다.
+방식을 자유롭게 오갈 수 있습니다. 게이트 스크립트를 프롬프트 없이 실행하는
+기능도 동일합니다: 플러그인 매니페스트는 permissions 규칙을 선언할 수
+없지만(그런 필드 자체가 없음), `permission-gate.sh` 훅은 등록 방식과
+무관하게 권한 검사보다 먼저 실행되므로 install.sh 배치와 똑같이 동작합니다
+— 위 (1)/(2) 방어선 중 (1)만으로 커버되는 셈입니다. 두 방식은 당분간 함께
+유지되며, `install.sh`는 플러그인 방식이 한두 릴리스 정도 검증된 뒤에야
+폐기 절차를 밟습니다.
 
 ## 사용 흐름
 
@@ -355,7 +365,7 @@ Windows 체크아웃에서 깨짐)도 함께 검증합니다.
 ```
 
 이 툴킷의 훅·스킬을 제거하고, `.claude/settings.json`에서도 이 툴킷이 등록한
-훅 4종과 `Bash(.claude/hooks/*)` 허용 규칙만 골라 제거합니다 — 같은 이벤트에
+훅 5종과 `Bash(.claude/hooks/*)` 허용 규칙만 골라 제거합니다 — 같은 이벤트에
 등록된 다른 훅이나 사용자의 다른 allow 항목은 그대로 남습니다.
 아무것도 완전히 삭제하지 않고 먼저 `.claude/backup/uninstall-<timestamp>/`로
 옮긴 뒤 제거하므로 언제든 되돌릴 수 있습니다. `.cursor-context/`(생성된 문서와
@@ -370,11 +380,14 @@ Windows 체크아웃에서 깨짐)도 함께 검증합니다.
 ```bash
 rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
    .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
-   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh .claude/hooks/lib-config.sh
+   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh \
+   .claude/hooks/permission-gate.sh .claude/hooks/lib-config.sh
 rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
 rm -rf .cursor-context
 # 마지막으로 .claude/settings.json의 hooks 배열에서 session-context.sh /
-# prompt-freshness.sh / metrics-collector.sh / evolve-gate.sh 네 항목을 제거하세요.
+# prompt-freshness.sh / metrics-collector.sh / evolve-gate.sh /
+# permission-gate.sh 다섯 항목과, permissions.allow의
+# Bash(.claude/hooks/*) 항목을 제거하세요.
 ```
 
 ## 문제 해결
