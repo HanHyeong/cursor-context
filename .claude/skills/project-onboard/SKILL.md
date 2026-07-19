@@ -53,6 +53,22 @@ HEAD=$(git rev-parse HEAD)
 FP=$(.claude/hooks/context-fingerprint.sh)
 ```
 
+**리터럴 경로를 유지한다 — 변수로 바꾸지 마라.** `permission-gate.sh`
+(PreToolUse 훅, 두 배치 모두 등록됨)가 위와 같은 단독 호출 또는
+`FP=$(...)` 형태의 명령을 결정론적으로 승인해 프롬프트를 건너뛰게 하는데,
+승인 여부는 명령 텍스트의 **첫 토큰이 훅 자신의 실제 위치와 문자 그대로
+일치**하는지로 판정한다(셸 변수로 감싸면 매칭이 깨져 매번 프롬프트가
+뜬다 — 과거 실제로 있었던 회귀, `tests/skills.bats`가 재발을 고정한다).
+install.sh 배치(대부분의 경우)에서는 위 명령을 그대로 실행한다.
+
+**그 경로에 스크립트가 없다면**(플러그인 배치): 이 SKILL.md 파일을 읽을 때
+보이는 자신의 절대 경로에서 `../../hooks/context-fingerprint.sh`가
+가리키는 **실제 절대 경로를 계산**해서, 그 절대 경로를 리터럴로 명령에
+쓴다 — `../../hooks/...`라는 문자열을 그대로 명령으로 실행하면 안 된다
+(Bash 도구는 프로젝트 루트를 cwd로 실행하므로 스킬 파일 기준 상대경로가
+아니다). 올바른 절대 경로를 쓰면 `permission-gate.sh`가 플러그인 배치에서도
+동일하게 승인한다.
+
 ```markdown
 <!-- generated-at-commit: (위 HEAD 값) -->
 <!-- context-fingerprint-begin

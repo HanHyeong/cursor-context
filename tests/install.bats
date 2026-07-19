@@ -3,7 +3,7 @@
 # 훅/스킬 자리에 있는 타입 불일치 파일의 백업 처리.
 
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-HOOKS="session-context.sh context-fingerprint.sh prompt-freshness.sh metrics-collector.sh context-benchmark.sh evolve-gate.sh lib-config.sh"
+HOOKS="session-context.sh context-fingerprint.sh prompt-freshness.sh metrics-collector.sh context-benchmark.sh evolve-gate.sh permission-gate.sh lib-config.sh"
 SKILLS="project-onboard context-refresh context-evolve"
 
 setup() {
@@ -65,13 +65,16 @@ make_nopython_path() {
   [ -f "$TARGET/.claude/settings.json" ]
   run python3 -c "import json; json.load(open('$TARGET/.claude/settings.json'))"
   [ "$status" -eq 0 ]
-  # 스킬이 게이트 스크립트를 Bash 도구로 실행할 수 있게 하는 허용 규칙 —
+  # 스킬이 게이트 스크립트를 Bash 도구로 실행할 수 있게 하는 두 방어선 —
+  # PreToolUse permission-gate.sh(결정론적, 플러그인 배치에서도 동작)와
+  # 정적 permissions.allow 규칙(install.sh 배치 전용 보조 방어선). 둘 다
   # 없으면 권한이 막힌 세션에서 context-evolve가 스킵되어 Stop 게이트가
   # 새 세션마다 반복 발동한다.
   run python3 -c "
 import json
 d = json.load(open('$TARGET/.claude/settings.json'))
 assert 'Bash(.claude/hooks/*)' in d['permissions']['allow']
+assert any('permission-gate.sh' in h['command'] for m in d['hooks']['PreToolUse'] for h in m['hooks'])
 print('ok')
 "
   [ "$status" -eq 0 ]
@@ -110,7 +113,11 @@ JSON
 import json
 d = json.load(open('$TARGET/.claude/settings.json'))
 assert d['customKey'] == 'keep-me'
+# 사용자가 이미 등록해 둔 PreToolUse 훅(다른 이벤트가 아니라 같은
+# 이벤트!)이 그대로 남아 있어야 한다 — 우리 permission-gate.sh는 같은
+# 배열에 '추가'되지, 대체하지 않는다.
 assert d['hooks']['PreToolUse'][0]['hooks'][0]['command'] == 'echo custom-hook'
+assert any('permission-gate.sh' in h['command'] for m in d['hooks']['PreToolUse'] for h in m['hooks'])
 assert any('session-context.sh' in h['command'] for m in d['hooks']['SessionStart'] for h in m['hooks'])
 assert any('evolve-gate.sh' in h['command'] for m in d['hooks']['Stop'] for h in m['hooks'])
 assert any('prompt-freshness.sh' in h['command'] for m in d['hooks']['UserPromptSubmit'] for h in m['hooks'])
@@ -231,13 +238,14 @@ FEEDBACK_THRESHOLD=42" > "$TARGET/.cursor-context/config"
   [ "$found_hook_backup" -ge 1 ]
   found_skill_backup=$(find "$TARGET/.claude/backup" -path "*/uninstall-*/skills/project-onboard" 2>/dev/null | wc -l | tr -d ' ')
   [ "$found_skill_backup" -ge 1 ]
-  # settings.json: our 4 hook entries and permission rule gone, file still valid JSON
+  # settings.json: our 5 hook entries and permission rule gone, file still valid JSON
   run python3 -c "
 import json
 d = json.load(open('$TARGET/.claude/settings.json'))
 h = d.get('hooks', {})
 assert not any('session-context.sh' in hk.get('command','') for m in h.get('SessionStart', []) for hk in m.get('hooks', []))
 assert not any('evolve-gate.sh' in hk.get('command','') for m in h.get('Stop', []) for hk in m.get('hooks', []))
+assert not any('permission-gate.sh' in hk.get('command','') for m in h.get('PreToolUse', []) for hk in m.get('hooks', []))
 assert 'Bash(.claude/hooks/*)' not in d.get('permissions', {}).get('allow', [])
 print('ok')
 "
@@ -264,6 +272,29 @@ import json
 d = json.load(open('$TARGET/.claude/settings.json'))
 assert any(hk.get('command') == 'echo my-own-hook' for m in d['hooks'].get('PostToolUse', []) for hk in m.get('hooks', []))
 assert not any('metrics-collector.sh' in hk.get('command','') for m in d['hooks'].get('PostToolUse', []) for hk in m.get('hooks', []))
+print('ok')
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok"* ]]
+}
+
+@test "--uninstall preserves the user's own PreToolUse hook while removing only permission-gate.sh" {
+  "$REPO_ROOT/install.sh" "$TARGET" --no-onboard >/dev/null
+  run python3 -c "
+import json
+p = '$TARGET/.claude/settings.json'
+d = json.load(open(p))
+d['hooks'].setdefault('PreToolUse', []).append({'matcher': 'Write', 'hooks': [{'type': 'command', 'command': 'echo my-own-pretooluse-hook'}]})
+json.dump(d, open(p, 'w'), indent=2)
+"
+  [ "$status" -eq 0 ]
+  run "$REPO_ROOT/install.sh" "$TARGET" --uninstall
+  [ "$status" -eq 0 ]
+  run python3 -c "
+import json
+d = json.load(open('$TARGET/.claude/settings.json'))
+assert any(hk.get('command') == 'echo my-own-pretooluse-hook' for m in d['hooks'].get('PreToolUse', []) for hk in m.get('hooks', []))
+assert not any('permission-gate.sh' in hk.get('command','') for m in d['hooks'].get('PreToolUse', []) for hk in m.get('hooks', []))
 print('ok')
 "
   [ "$status" -eq 0 ]

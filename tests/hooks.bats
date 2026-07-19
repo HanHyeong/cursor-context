@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # session-context.sh(SessionStart), prompt-freshness.sh(UserPromptSubmit),
-# evolve-gate.sh(Stop), metrics-collector.sh(PostToolUse) 검증.
+# evolve-gate.sh(Stop), metrics-collector.sh(PostToolUse),
+# permission-gate.sh(PreToolUse) 검증.
 
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
@@ -195,6 +196,82 @@ seed_signals() {
   grep -q '"cmd": "npm test"' .cursor-context/metrics.jsonl
 }
 
+@test "metrics-collector.sh records the session id when the hook input provides one" {
+  echo '{"session_id":"sess-abc","tool_name":"Read","tool_input":{"file_path":"foo.txt"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  grep -q '"sid": "sess-abc"' .cursor-context/metrics.jsonl
+}
+
+@test "metrics-collector.sh does not log toolkit self-observation (.cursor-context targets)" {
+  rm -f .cursor-context/metrics.jsonl
+  echo '{"tool_name":"Read","tool_input":{"file_path":".cursor-context/metrics.jsonl"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  echo '{"tool_name":"Bash","tool_input":{"command":"cat .cursor-context/context-feedback.jsonl"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  [ ! -f .cursor-context/metrics.jsonl ]
+}
+
+@test "metrics-collector.sh --digest aggregates hits and distinct sessions deterministically" {
+  cat > .cursor-context/metrics.jsonl <<'EOF'
+{"ts": 100, "tool": "Read", "sid": "s1", "path": "/p/src/a.js"}
+{"ts": 200, "tool": "Read", "sid": "s2", "path": "/p/src/b.js"}
+{"ts": 300, "tool": "Bash", "sid": "s1", "cmd": "npm test --silent"}
+{"ts": 400, "tool": "Bash", "sid": "s2", "cmd": "npm test"}
+{"ts": 500, "tool": "Grep", "sid": "s1", "pattern": "foo", "path": "src"}
+{"ts": 600, "tool": "Bash", "sid": "s2", "cmd": "cd /tmp && npm test"}
+not-json-garbage-line
+EOF
+  run .claude/hooks/metrics-collector.sh --digest
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"6 entries, 2 sessions"* ]]
+  # 게이트(awk, 비어 있지 않은 줄 수)와의 계수 차이가 보이도록 파싱 불가 줄 수를 보고한다
+  [[ "$output" == *"1 unparsable lines skipped"* ]]
+  # npm test: 체인 명령(cd /tmp && npm test)의 세그먼트 계수 포함 3회, 세션 2개
+  echo "$output" | grep -qE '^ +3 +2 +npm test$'
+  echo "$output" | grep -qE '^ +1 +1 +cd /tmp$'
+  echo "$output" | grep -qE '^ +2 +2 +/p/src$'
+  echo "$output" | grep -qE '^ +1 +1 +src$'
+}
+
+@test "metrics-collector.sh --digest ranks cross-session repetition above single-session hit counts" {
+  # 4회지만 한 세션뿐인 항목보다 2회·2세션 항목이 위에 와야 한다 —
+  # 세션 간 반복이 문서 갭의 핵심 증거라는 다이제스트의 존재 이유 그 자체.
+  cat > .cursor-context/metrics.jsonl <<'EOF'
+{"ts": 1, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 2, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 3, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 4, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 5, "tool": "Bash", "sid": "s1", "cmd": "make deploy-check"}
+{"ts": 6, "tool": "Bash", "sid": "s2", "cmd": "make deploy-check"}
+EOF
+  run .claude/hooks/metrics-collector.sh --digest
+  [ "$status" -eq 0 ]
+  first_row=$(echo "$output" | grep -E '^ +[0-9]+ +[0-9]+ +make' | head -1)
+  [[ "$first_row" == *"make deploy-check"* ]]
+}
+
+@test "metrics-collector.sh keeps a grep whose pattern mentions .cursor-context but targets real source" {
+  rm -f .cursor-context/metrics.jsonl
+  echo '{"tool_name":"Grep","tool_input":{"pattern":".cursor-context","path":"src/"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  grep -q '"path": "src/"' .cursor-context/metrics.jsonl
+}
+
+@test "metrics-collector.sh does not log invocations of the toolkit's own scripts" {
+  rm -f .cursor-context/metrics.jsonl
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-benchmark.sh doc.md"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  echo '{"tool_name":"Bash","tool_input":{"command":"bash .claude/hooks/metrics-collector.sh --digest"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  [ ! -f .cursor-context/metrics.jsonl ]
+}
+
 @test "metrics-collector.sh redacts credential-shaped values in logged Bash commands" {
   echo '{"tool_name":"Bash","tool_input":{"command":"curl -H \"Authorization: Bearer abc123xyz\" --api-key=SUPERSECRET https://example.com && export DB_PASSWORD=hunter2 && npm test"}}' > input.json
   run .claude/hooks/metrics-collector.sh < input.json
@@ -372,4 +449,127 @@ COMMIT_BACKSTOP=2" > .cursor-context/config
   # 기본값(20)이라면 커밋 3개로는 백스톱이 걸리지 않았을 것 — COMMIT_BACKSTOP=2로
   # 낮췄으니 커밋이 3개 쌓인 지금 백스톱 안내가 떠야 한다.
   [[ "$output" == *"문서 생성 후 커밋이 3개 쌓였습니다"* ]]
+}
+
+# ---------------------------------------------------------------
+# permission-gate.sh (PreToolUse, matcher: Bash)
+# ---------------------------------------------------------------
+
+@test "permission-gate.sh allows a bare invocation of its own gate script via .claude/hooks/ relative path" {
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-benchmark.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+}
+
+@test "permission-gate.sh allows the digest/fingerprint scripts with simple trailing arguments" {
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/metrics-collector.sh --digest"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-fingerprint.sh --changed doc.md"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+}
+
+@test "permission-gate.sh allows the documented FP=\$(...) command-substitution pattern" {
+  # context-refresh/project-onboard SKILL.md의 유일한 실사용 패턴: 지문
+  # 출력을 변수에 담는다. 이걸 막으면 훅이 자기 존재 이유를 못 지킨다.
+  echo '{"tool_name":"Bash","tool_input":{"command":"FP=$(.claude/hooks/context-fingerprint.sh)"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+
+  echo '{"tool_name":"Bash","tool_input":{"command":"HEAD=$(git rev-parse HEAD)"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh rejects command-substitution attempts to smuggle a second command" {
+  for cmd in \
+    'FP=$(.claude/hooks/context-fingerprint.sh $(whoami))' \
+    'FP=$(.claude/hooks/context-fingerprint.sh; whoami)' \
+    'FP=$(.claude/hooks/context-benchmark.sh); rm -rf ~'
+  do
+    printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$cmd")" > input.json
+    run .claude/hooks/permission-gate.sh < input.json
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "permission-gate.sh does not treat vertical-tab/form-feed as a bash word separator (would misjudge a command bash actually glues into one failing token)" {
+  python3 -c "
+import json
+print(json.dumps({'tool_name':'Bash','tool_input':{'command':'.claude/hooks/context-benchmark.sh\x0bwhoami'}}))
+" > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh allows the absolute HOOK_DIR-anchored form (plugin layout simulation)" {
+  # 플러그인 배치를 흉내낸다: 훅이 .claude/hooks가 아닌 임의의 디렉터리에
+  # 있고, 명령이 그 절대경로를 그대로 쓴다.
+  PLUGIN_DIR="$(mktemp -d)/hooks"
+  mkdir -p "$PLUGIN_DIR"
+  cp "$REPO_ROOT"/.claude/hooks/permission-gate.sh "$PLUGIN_DIR/"
+  chmod +x "$PLUGIN_DIR"/*.sh
+  echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$PLUGIN_DIR/context-benchmark.sh\"}}" > input.json
+  run "$PLUGIN_DIR/permission-gate.sh" < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+  # 플러그인 배치에서는 install.sh 배치용 상대경로(.claude/hooks/...)는
+  # 인정하지 않는다 — HOOK_DIR이 .claude/hooks로 끝나지 않기 때문이다.
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-benchmark.sh"}}' > input.json
+  run "$PLUGIN_DIR/permission-gate.sh" < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh never allows when the command contains shell metacharacters" {
+  for cmd in \
+    '.claude/hooks/context-benchmark.sh; rm -rf ~' \
+    '.claude/hooks/context-benchmark.sh && rm -rf ~' \
+    '.claude/hooks/context-benchmark.sh | cat' \
+    '.claude/hooks/context-benchmark.sh $(whoami)' \
+    '.claude/hooks/context-benchmark.sh `whoami`' \
+    '.claude/hooks/context-benchmark.sh > /etc/passwd'
+  do
+    printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$cmd")" > input.json
+    run .claude/hooks/permission-gate.sh < input.json
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "permission-gate.sh never allows a script outside its own hook directory" {
+  echo '{"tool_name":"Bash","tool_input":{"command":"/tmp/evil/context-benchmark.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh never allows a script it does not recognize by name" {
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/session-context.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh ignores non-Bash tool calls" {
+  echo '{"tool_name":"Read","tool_input":{"file_path":".claude/hooks/context-benchmark.sh"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh tolerates malformed JSON input without crashing" {
+  echo 'not json at all' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }

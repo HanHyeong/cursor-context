@@ -52,7 +52,7 @@
 
 ```
 .claude/                               # 코드 계층 (진화 대상 아님)
-├── settings.json                      # 훅 4종 등록 + Bash(.claude/hooks/*) 허용 규칙
+├── settings.json                      # 훅 5종 등록 + Bash(.claude/hooks/*) 허용 규칙
 ├── hooks/
 │   ├── session-context.sh             # 세션 시작: 스냅샷 주입 + 신선도 검사
 │   ├── prompt-freshness.sh            # 매 프롬프트: 지문 재검사 (일치하면 침묵)
@@ -60,6 +60,7 @@
 │   ├── metrics-collector.sh           # 도구 사용 신호 측정 (자기 평가용)
 │   ├── evolve-gate.sh                 # Stop 게이트: 신호 임계 도달 시 진화 강제
 │   ├── context-benchmark.sh           # 문서 품질 게이트 (진화 채택 심사)
+│   ├── permission-gate.sh             # PreToolUse: 게이트 스크립트 단독 호출 승인
 │   └── lib-config.sh                  # .cursor-context/config 공유 로더 (훅 아님)
 └── skills/
     ├── project-onboard/SKILL.md       # 문서 자동 생성
@@ -180,9 +181,13 @@ cd cursor-context
 **설치는 비파괴적이며 병합까지 자동입니다** — 기존 환경에 영향을 주지 않습니다:
 
 - 기존 `settings.json`이 있으면 **hooks 배열과 permissions.allow에만 자동으로
-  추가 병합**합니다 — 허용 규칙 `Bash(.claude/hooks/*)`은 스킬이 게이트
-  스크립트(context-benchmark.sh 등)를 Bash 도구로 권한 프롬프트 없이 실행하기
-  위해 필요합니다. 이 규칙이 없으면 권한이 허용되지 않은 세션에서 진화가
+  추가 병합**합니다 — 스킬이 게이트 스크립트(context-benchmark.sh 등)를
+  Bash 도구로 실행하는 것은 권한 게이트에 걸리는데, 이를 우회하는 방어선이
+  두 겹입니다: (1) `permission-gate.sh`(PreToolUse 훅) — 이 툴킷 자신의
+  게이트/지문/다이제스트 스크립트를 셸 특수문자 없이 단독 호출하는 경우만
+  결정론적으로 승인하는 주 방어선(플러그인 배치에서도 동일하게 동작), (2)
+  정적 규칙 `permissions.allow: Bash(.claude/hooks/*)` — install.sh 배치
+  전용 보조 방어선. 둘 다 없으면 권한이 허용되지 않은 세션에서 진화가
   조용히 스킵되어 Stop 게이트가 새 세션마다 반복 발동합니다.
   (기존 키·훅·허용 항목의 의미 전부 보존, 병합 전 원본 백업, 재실행 시 중복
   등록 없음. 단, JSON 재직렬화로 들여쓰기 등 포맷은 정리될 수 있습니다).
@@ -234,7 +239,8 @@ cd cursor-context
 
 `.claude/` 디렉터리를 대상 프로젝트 루트에 복사하고
 `chmod +x .claude/hooks/*.sh` 후 Claude Code를 재시작하면 됩니다.
-기존 `.claude/settings.json`이 있다면 `hooks` 섹션과 `permissions.allow`의
+기존 `.claude/settings.json`이 있다면 `hooks` 섹션(PreToolUse의
+permission-gate.sh 포함)과 `permissions.allow`의
 `Bash(.claude/hooks/*)` 규칙을 병합하세요
 (배열에 추가하는 방식이라 기존 훅은 그대로 함께 실행됩니다).
 
@@ -253,9 +259,17 @@ cd cursor-context
 `${CLAUDE_PROJECT_DIR}/.claude` 대신 `${CLAUDE_PLUGIN_ROOT}`를 씁니다.
 기계 생성 데이터는 이 경우에도 프로젝트 루트의 `.cursor-context/`에
 그대로 쌓입니다 — 플러그인이라고 별도 저장 위치를 쓰지 않으므로 두 설치
-방식을 자유롭게 오갈 수 있습니다. 두 방식은 당분간 함께 유지되며,
-`install.sh`는 플러그인 방식이 한두 릴리스 정도 검증된 뒤에야 폐기 절차를
-밟습니다.
+방식을 자유롭게 오갈 수 있습니다. 게이트 스크립트를 프롬프트 없이 실행하는
+기능도 동일합니다: 플러그인 매니페스트는 permissions 규칙을 선언할 수
+없지만(그런 필드 자체가 없음), `permission-gate.sh` 훅은 등록 방식과
+무관하게 권한 검사보다 먼저 실행되므로 install.sh 배치와 똑같이 동작합니다
+— 위 (1)/(2) 방어선 중 (1)만으로 커버되는 셈입니다. 단, 이는 스킬이
+런타임에 플러그인의 실제 절대 경로를 계산해 쓴다는 전제가 있어야
+합니다(permission-gate.sh의 정확 일치 판정은 진짜 경로가 필요) — 이
+부분은 리터럴/변수 규칙처럼 결정론적으로 강제되지 않고 SKILL.md 지시를
+모델이 따르는 데 의존합니다. 두 방식은 당분간 함께
+유지되며, `install.sh`는 플러그인 방식이 한두 릴리스 정도 검증된 뒤에야
+폐기 절차를 밟습니다.
 
 ## 사용 흐름
 
@@ -280,6 +294,9 @@ cd cursor-context
   (`token=`, `password=`, `api-key=`, `Bearer …`)은 기록 전에 베스트 에포트로
   마스킹되지만 이는 안전망이지 보증이 아닙니다 — 시크릿을 CLI 인자로 직접
   넘기지 마세요. 이 파일은 gitignore되며 로컬을 벗어나지 않습니다.
+  자기 관측은 제외됩니다: 대상 경로가 `.cursor-context/` 안인 호출과 툴킷
+  자신의 스크립트를 호출하는 Bash 명령은 기록하지 않습니다 — 툴킷이 자기
+  활동을 측정하면 수집하는 신호 자체가 오염되기 때문입니다.
 - **반성 (비용 ≈ 0)** — 매 세션에 상시 규칙 주입: 문서가 틀렸거나 없어서
   탐색이 필요했던 주제가 있으면 작업 후 `.cursor-context/context-feedback.jsonl`에
   JSON 한 줄을 남깁니다.
@@ -287,14 +304,25 @@ cd cursor-context
   메트릭 300줄) `Stop` 훅(`evolve-gate.sh`)이 턴 종료를 차단하고 작업 완료 후
   `/context-evolve` 실행을 강제합니다 — "나중에 하라"는 주입 지시는 확률적
   보장뿐임이 실측으로 확인되어, 강제는 모델 준수가 아닌 하네스에 둡니다.
-  진화가 실제로 실행되면 신호 파일이 소진되어 임계 조건 자체가 해제되므로
-  차단은 임계값 교차당 최대 1회입니다(+ stop_hook_active 가드). 진화를
-  건너뛴 세션(plan 모드, 읽기 전용 등)에서는 신호가 소진되지 않지만, 세션
-  단위 sentinel(`.cursor-context/.gate-fired-<session_id>`)이 **세션당 최대
-  1회**로 다시 제한합니다 — 같은 세션의 다음 턴들은 통과하고, 새 세션에서는
-  다시 1회 차단됩니다. 쓰기가 부적절한 세션은 그대로 종료를 허용합니다.
-  진화 내용: 틀린 것 수정, 반복 탐색된 것 추가, **어떤 세션도 안 쓴 섹션
-  삭제** (200줄 예산이 "더 많이"가 아니라 "더 잘 고르기"를 강제).
+  분석은 원시 로그가 아니라 결정론적 요약(`metrics-collector.sh --digest`:
+  명령·경로별 횟수 + 고유 세션 수)에서 출발합니다 — 문서 갭의 진짜
+  증거는 세션 간 반복이고, 집계는 순수 코드가 해야 정확합니다. 진화 내용:
+  틀린 것 수정, 여러 세션이 재탐색한 것 추가, evolve-log 대조로 재발 검사
+  (과거 진화가 고쳤다는 영역이 다시 나타나면 최우선 재처리 + 기록). 삭제는
+  의도적으로 보수적입니다 — 틀렸거나 낡은 서술, CLAUDE.md 중복에 한정하며,
+  **신호 부재는 삭제 근거가 아닙니다**: metrics는 사용이 아니라 갭을
+  측정하므로, 잘 작동하는 섹션일수록 탐색 신호가 없습니다 — 침묵은 성공일
+  수 있습니다 (200줄 예산은 여전히 "더 많이"가 아니라 "더 잘 고르기"를
+  강제합니다). 진화가 **채택되면** 신호 파일이 소진되어 임계 조건 자체가
+  해제되므로 차단은 임계값 교차당 최대 1회입니다(+ stop_hook_active 가드).
+  기각된 재작성은 신호 파일을 증거로 보존하되, **연속 2회 기각이면
+  소진합니다**(증거는 진화 백업에 남음) — 재시도가 무한 반복되지 않도록
+  상한을 둔 것입니다. 기각 후와 진화를 건너뛴
+  세션(plan 모드, 읽기 전용 등) 모두, 세션 단위
+  sentinel(`.cursor-context/.gate-fired-<session_id>`)이 **세션당 최대
+  1회**로 차단을 제한합니다 — 같은 세션의 다음 턴들은 통과하고, 새
+  세션에서는 다시 1회 차단됩니다. 쓰기가 부적절한 세션은 그대로 종료를
+  허용합니다.
 - **선택 (결정론적 게이트)** — 새 문서 채택 전 `context-benchmark.sh`가
   검사: 줄 수 예산, 본문 실질 줄 수 하한(`DOC_MIN_LINES` — 내용을 다
   지워버리는 변이는 절대 채택될 수 없음), 마커·지문 유효성, 언급된
@@ -341,7 +369,7 @@ Windows 체크아웃에서 깨짐)도 함께 검증합니다.
 ```
 
 이 툴킷의 훅·스킬을 제거하고, `.claude/settings.json`에서도 이 툴킷이 등록한
-훅 4종과 `Bash(.claude/hooks/*)` 허용 규칙만 골라 제거합니다 — 같은 이벤트에
+훅 5종과 `Bash(.claude/hooks/*)` 허용 규칙만 골라 제거합니다 — 같은 이벤트에
 등록된 다른 훅이나 사용자의 다른 allow 항목은 그대로 남습니다.
 아무것도 완전히 삭제하지 않고 먼저 `.claude/backup/uninstall-<timestamp>/`로
 옮긴 뒤 제거하므로 언제든 되돌릴 수 있습니다. `.cursor-context/`(생성된 문서와
@@ -356,11 +384,14 @@ Windows 체크아웃에서 깨짐)도 함께 검증합니다.
 ```bash
 rm .claude/hooks/session-context.sh .claude/hooks/prompt-freshness.sh \
    .claude/hooks/context-fingerprint.sh .claude/hooks/metrics-collector.sh \
-   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh .claude/hooks/lib-config.sh
+   .claude/hooks/context-benchmark.sh .claude/hooks/evolve-gate.sh \
+   .claude/hooks/permission-gate.sh .claude/hooks/lib-config.sh
 rm -rf .claude/skills/project-onboard .claude/skills/context-refresh .claude/skills/context-evolve
 rm -rf .cursor-context
 # 마지막으로 .claude/settings.json의 hooks 배열에서 session-context.sh /
-# prompt-freshness.sh / metrics-collector.sh / evolve-gate.sh 네 항목을 제거하세요.
+# prompt-freshness.sh / metrics-collector.sh / evolve-gate.sh /
+# permission-gate.sh 다섯 항목과, permissions.allow의
+# Bash(.claude/hooks/*) 항목을 제거하세요.
 ```
 
 ## 문제 해결
