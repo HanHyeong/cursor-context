@@ -19,14 +19,16 @@ README가 영어 우선이므로) project-context.md **본문**을 한국어 대
 읽는 주체가 사람이 아니라 Claude이므로 언어와 무관하게 동일하게 이해한다.
 config가 없거나 `LANG=ko`면 한국어로 작성한다.
 
-## 훅 스크립트 위치 (`<hooks>/` 표기)
+## 훅 스크립트 위치 (`$HOOKS` 변수)
 
 이 스킬이 실행하는 훅 스크립트의 경로는 배치에 따라 다르다: install.sh
 배치는 프로젝트의 `.claude/hooks/`, 플러그인 배치는 이 SKILL.md 기준
 `../../hooks/`다 (두 배치 모두 `skills/<이름>/`과 `hooks/`가 같은 루트의
-형제 디렉터리라 상대 경로는 동일하다). 아래 절차의 `<hooks>/`는 이렇게
-해석한다: **`.claude/hooks/`에 해당 스크립트가 있으면 그것을 쓰고, 없으면
-이 스킬 디렉터리 기준 `../../hooks/`를 쓴다.**
+형제 디렉터리라 상대 경로는 동일하다). 아래 코드 블록들은 맨 처음에
+`HOOKS=.claude/hooks`를 설정한다 — **플러그인 배치(그 경로에 스크립트가
+없음)라면 이 SKILL.md의 실제 위치 기준 `../../hooks`의 절대 경로로 바꿔서
+실행하라.** 잘못된 경로면 명령이 조용히 빈 값을 내는 게 아니라 "command
+not found"로 크게 실패하므로, 에러가 보이면 경로부터 다시 확인한다.
 
 ## 절대 규칙 (진화의 경계)
 
@@ -45,8 +47,9 @@ config가 없거나 `LANG=ko`면 한국어로 작성한다.
 ### 1. 신호 수집
 
 ```bash
+HOOKS=.claude/hooks   # 플러그인 배치면 이 SKILL.md 기준 ../../hooks 의 실제 경로로 교체
 cat .cursor-context/context-feedback.jsonl 2>/dev/null   # {"type":"wrong|gap","area":...,"note":...}
-<hooks>/metrics-collector.sh --digest                    # 결정론적 요약: 명령/디렉터리별 횟수 + 고유 세션 수
+"$HOOKS"/metrics-collector.sh --digest                   # 결정론적 요약: 명령/경로별 횟수 + 고유 세션 수
 ```
 
 metrics는 반드시 `--digest` 요약으로 읽는다 — 원본(metrics.jsonl)은 수천
@@ -75,7 +78,7 @@ metrics는 반드시 `--digest` 요약으로 읽는다 — 원본(metrics.jsonl)
   섹션일수록 탐색을 만들지 않아 신호가 0이다 — 침묵은 성공일 수 있다.
   삭제는 (a) 실제 코드와 대조해 틀렸거나 낡은 서술, (b) CLAUDE.md와 중복된
   내용에 한정한다. 200줄 예산 초과로 부득이 줄일 때만 그 외 섹션을 다이어트
-  하되, 위 (b)의 복원 대상은 건드리지 않는다.
+  하되, **재발 검사에서 복원한 섹션은 절대 건드리지 않는다.**
 
 ### 3. 백업 — 반드시 재작성 전에
 
@@ -90,9 +93,9 @@ cp .cursor-context/project-context.md .cursor-context/backup/evolve-<ts>/
 ### 4. 기준 점수 → 재작성 → 게이트
 
 ```bash
-<hooks>/context-benchmark.sh          # 기준 점수 기록 (PASS 수)
+"$HOOKS"/context-benchmark.sh          # 기준 점수 기록 (PASS 수)
 # ... 문서 재작성 (project-onboard의 작성 원칙 준수, 마커 재기록 필수) ...
-<hooks>/context-benchmark.sh          # 새 문서 채점
+"$HOOKS"/context-benchmark.sh          # 새 문서 채점
 ```
 
 **채택 조건: 새 문서의 FAIL=0 그리고 PASS 수 ≥ 기준 PASS 수.**
@@ -109,10 +112,17 @@ mv .cursor-context/metrics.jsonl .cursor-context/backup/evolve-<ts>/ 2>/dev/null
 ```
 
 **기각된 경우 신호 파일은 그대로 둔다.** 문서가 개선되지 않았는데 그 개선을
-요구했던 증거를 버리면 같은 갭이 근거 없이 남는다. 재트리거 루프는 걱정할
-필요 없다 — 같은 세션의 재차단은 evolve-gate의 세션 단위 sentinel이 막고,
-새 세션에서의 재시도는 의도된 동작이다(지속 기각은 숨길 문제가 아니라
-드러나야 할 문제다).
+요구했던 증거를 버리면 같은 갭이 근거 없이 남는다. 같은 세션의 재차단은
+evolve-gate의 세션 단위 sentinel이 막고, 새 세션에서의 재시도 1회는 의도된
+동작이다.
+
+**연속 기각 상한 (재시도는 유한해야 한다)**: 기각으로 끝날 때는
+`.cursor-context/evolve-log.jsonl`의 **직전 항목**을 확인한다. 직전 항목도
+기각(`"accepted":false`)이면 — 연속 2회 기각 — 이번에는 신호 파일을
+소진한다(위와 같이 백업으로 이동; 증거는 백업 디렉터리에 그대로 남는다).
+그래야 통과 불가능한 문서 하나가 세션마다 재작성→기각 사이클을 영원히
+반복하며 토큰을 태우는 것을 막을 수 있다. 이때 reject_reason에 "연속 2회
+기각으로 신호 소진"을 명시해 사람이 원인을 볼 수 있게 한다.
 
 그리고 채택 여부와 무관하게 `.cursor-context/evolve-log.jsonl`에 결과 한 줄을 추가한다:
 

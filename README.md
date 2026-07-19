@@ -204,7 +204,10 @@ measure → reflect → mutate → select loop:
   (`token=`, `password=`, `api-key=`, `Bearer …`) are redacted best-effort
   before writing, but that is a safety net, not a guarantee — don't pass raw
   secrets as CLI arguments. The file is gitignored and never leaves your
-  machine.
+  machine. Self-observation is excluded: calls whose target path is inside
+  `.cursor-context/`, and Bash commands that invoke the toolkit's own
+  scripts, are not logged — the toolkit measuring its own activity would
+  pollute the very signals it collects.
 - **Reflect (near-zero cost)** — every session carries a standing rule: if the
   doc was wrong or missing something that required real exploration, append
   one JSON line to `.cursor-context/context-feedback.jsonl` after finishing the task.
@@ -215,7 +218,7 @@ measure → reflect → mutate → select loop:
   only probabilistic in testing, so enforcement lives in the harness, not
   in model compliance. Analysis starts from a deterministic digest
   (`metrics-collector.sh --digest`: hit counts plus distinct-session
-  tallies per command/directory), not the raw log — cross-session
+  tallies per command/path), not the raw log — cross-session
   recurrence is the evidence that matters, and pure-code counting is exact.
   Evolution fixes what was wrong, adds what multiple sessions had to
   re-explore, and checks `evolve-log` for recurrence: an area a past
@@ -227,8 +230,10 @@ measure → reflect → mutate → select loop:
   200-line budget still forces selection, not growth). The gate blocks at
   most once per threshold crossing when an evolution is **adopted**
   (adoption consumes the signal files, so the condition clears itself); a
-  rejected rewrite keeps the signal files as evidence. In that case — as
-  when a session skips evolution (plan mode, read-only) — a per-session sentinel
+  rejected rewrite keeps the signal files as evidence, and a **second
+  consecutive rejection consumes them** (the evidence survives in the evolve
+  backup) so retries are bounded instead of repeating forever. After a
+  rejection — as when a session skips evolution (plan mode, read-only) — a per-session sentinel
   (`.cursor-context/.gate-fired-<session_id>`) still caps it at once **per
   session** so it doesn't re-fire on every subsequent turn — a fresh
   session gets one fresh block. The gate never blocks read-only sessions'

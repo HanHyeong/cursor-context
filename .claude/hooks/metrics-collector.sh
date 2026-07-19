@@ -32,15 +32,25 @@ command -v python3 >/dev/null 2>&1 || exit 0
 if [ "${1:-}" = "--digest" ]; then
   [ -f .cursor-context/metrics.jsonl ] || { echo "metrics-digest: no metrics file"; exit 0; }
   python3 - <<'PY' 2>/dev/null || echo "metrics-digest: unavailable (python3 error)"
-import datetime, json, os
+import datetime, json, os, re
 from collections import defaultdict
 
 cmds = defaultdict(lambda: [0, set()])
-dirs = defaultdict(lambda: [0, set()])
+paths = defaultdict(lambda: [0, set()])
 greps = defaultdict(lambda: [0, set()])
 total = 0
+bad = 0          # 파싱 불가 라인 수 — evolve-gate의 임계값은 "비어 있지 않은
+                 # 줄 수"(awk NF) 기준이라 이 수를 숨기면 게이트가 말한 수와
+                 # 다이제스트 합계가 어긋나 보인다. 정직하게 함께 보고한다.
 sids = set()
 ts_min = ts_max = None
+sid = ""
+
+def bump(table, key):
+    e = table[key]
+    e[0] += 1
+    if sid:                       # 빈 sid(구버전 라인)는 세션 집합에 넣지 않는다
+        e[1].add(sid)
 
 with open(".cursor-context/metrics.jsonl") as f:
     for line in f:
@@ -50,6 +60,7 @@ with open(".cursor-context/metrics.jsonl") as f:
         try:
             r = json.loads(line)
         except Exception:
+            bad += 1
             continue
         total += 1
         sid = str(r.get("sid") or "")
@@ -61,31 +72,46 @@ with open(".cursor-context/metrics.jsonl") as f:
             ts_max = ts if ts_max is None else max(ts_max, ts)
         tool = r.get("tool")
         if tool == "Bash":
-            words = str(r.get("cmd") or "").split()
-            if words:
-                e = cmds[" ".join(words[:2])]; e[0] += 1; e[1].add(sid)
+            # 체인 명령(&&, ;, |)은 세그먼트별로 계수한다 — 통째로 첫 두
+            # 단어만 보면 `cd /a && npm test`가 전부 'cd /a'로 묶여 정작
+            # npm test가 영영 안 보인다. 선행 환경변수 대입(VAR=x ...)도
+            # 걷어내고 실제 명령 머리 두 단어를 키로 삼는다.
+            for seg in re.split(r'(?:&&|\|\||[;|])', str(r.get("cmd") or ""))[:8]:
+                ws = seg.split()
+                while ws and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', ws[0]):
+                    ws.pop(0)
+                if ws:
+                    bump(cmds, " ".join(ws[:2]))
         elif tool in ("Read", "Glob"):
             p = str(r.get("path") or "")
             if p:
-                e = dirs[os.path.dirname(p) or p]; e[0] += 1; e[1].add(sid)
+                # 글롭 패턴(*·?·[ 포함)은 dirname이 '**' 같은 무의미 키가
+                # 되므로 패턴 그대로, 일반 경로는 디렉터리로 묶는다.
+                key = p if any(ch in p for ch in "*?[") else (os.path.dirname(p) or p)
+                bump(paths, key)
         elif tool == "Grep":
-            p = str(r.get("path") or "") or "(repo root)"
-            e = greps[p]; e[0] += 1; e[1].add(sid)
+            bump(greps, str(r.get("path") or "") or "(repo root)")
 
 def day(ts):
     if ts is None:
         return "?"
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%d")
 
-print(f"metrics-digest: {total} entries, {len(sids)} sessions with id, {day(ts_min)}..{day(ts_max)}")
-for title, table in (("bash commands (first two words)", cmds),
-                     ("explored dirs (Read/Glob)", dirs),
+hdr = f"metrics-digest: {total} entries, {len(sids)} sessions with id, {day(ts_min)}..{day(ts_max)}"
+if bad:
+    hdr += f" ({bad} unparsable lines skipped)"
+print(hdr)
+for title, table in (("bash commands (first two words per segment)", cmds),
+                     ("explored paths (Read/Glob)", paths),
                      ("grep scopes", greps)):
     if not table:
         continue
     print(f"[{title}]  hits  sessions  key")
-    for k, (c, s) in sorted(table.items(), key=lambda kv: (-kv[1][0], kv[0]))[:15]:
-        print(f"  {c:>4}  {len({x for x in s if x}):>4}  {k}")
+    # 정렬은 고유 세션 수 우선 — 세션 간 반복이 문서 갭의 핵심 증거인데,
+    # 횟수만으로 자르면 "한 세션에서 여러 번"이 "여러 세션에서 반복"을
+    # 상위 15개 밖으로 밀어낼 수 있다.
+    for k, (c, s) in sorted(table.items(), key=lambda kv: (-len(kv[1][1]), -kv[1][0], kv[0]))[:15]:
+        print(f"  {c:>4}  {len(s):>4}  {k}")
 PY
   exit 0
 fi
@@ -108,7 +134,10 @@ ti = d.get("tool_input") or {}
 rec = {"ts": int(time.time()), "tool": tool}
 # 세션 id를 함께 기록한다 — "한 세션의 반복"(그 작업의 특성)과 "세션 간
 # 반복"(문서가 커버했어야 할 갭의 진짜 증거)을 --digest가 구분하는 데 쓴다.
-sid = str(d.get("session_id") or "")[:32]
+# [:64]는 비정상 입력의 라인 폭주 방지 상한일 뿐이다 — 통상적인 세션 id
+# (36자 UUID)는 절대 잘리지 않는다. 잘라서 구분 정보를 잃으면 다이제스트의
+# 고유 세션 계수가 과소 집계된다.
+sid = str(d.get("session_id") or "")[:64]
 if sid:
     rec["sid"] = sid
 if tool == "Bash":
@@ -130,13 +159,26 @@ elif tool == "Grep":
 else:
     sys.exit(0)
 
-# 자기 관측 방지: .cursor-context/(툴킷 자신의 데이터 계층)를 대상으로 한
-# 호출은 프로젝트 지식 갭의 신호가 아니라 툴킷 운영이다 — 특히 진화 실행
-# 자체가 신호 파일을 읽으며 다음 사이클의 신호를 오염시킨다. 지문 생성기가
-# .cursor-context/를 구조 해시에서 제외하는 것과 같은 원칙. .claude/ 등
-# 다른 경로는 거르지 않는다 — 그것이 실제 작업 대상인 프로젝트가 있다.
-probe = rec.get("cmd", "") + rec.get("path", "") + rec.get("pattern", "")
-if ".cursor-context" in probe:
+# 자기 관측 방지: 툴킷 자신의 운영은 프로젝트 지식 갭의 신호가 아니다 —
+# 특히 진화 실행 자체가 신호 파일을 읽고 벤치마크·다이제스트를 돌리며
+# 다음 사이클의 신호를 오염시킨다. 지문 생성기가 .cursor-context/를 구조
+# 해시에서 제외하는 것과 같은 원칙. 규칙은 두 갈래다:
+#   - Bash 명령: .cursor-context를 언급하거나 툴킷 스크립트를 호출하면 제외
+#     (진화가 실행하는 `.claude/hooks/context-benchmark.sh` 등은 경로에
+#     .cursor-context가 없어서 이름 목록으로 잡아야 한다)
+#   - Read/Glob/Grep: 대상 "경로"가 .cursor-context 안일 때만 제외.
+#     Grep의 "패턴"이 그 문자열을 언급하는 것만으로는 제외하지 않는다 —
+#     실제 소스를 검색하는 정당한 탐색 신호까지 지워버리기 때문.
+# .claude/ 등 다른 경로는 거르지 않는다 — 그것이 실제 작업 대상인 프로젝트가 있다.
+TOOLKIT_SCRIPTS = ("context-fingerprint.sh", "context-benchmark.sh",
+                   "metrics-collector.sh", "session-context.sh",
+                   "prompt-freshness.sh", "evolve-gate.sh", "lib-config.sh")
+cmd_s = rec.get("cmd", "")
+if ".cursor-context" in cmd_s or any(s in cmd_s for s in TOOLKIT_SCRIPTS):
+    sys.exit(0)
+path_s = rec.get("path", "")
+if (path_s == ".cursor-context" or path_s.startswith(".cursor-context/")
+        or "/.cursor-context/" in path_s or path_s.endswith("/.cursor-context")):
     sys.exit(0)
 
 p = ".cursor-context/metrics.jsonl"

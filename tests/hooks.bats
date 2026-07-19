@@ -220,15 +220,55 @@ seed_signals() {
 {"ts": 300, "tool": "Bash", "sid": "s1", "cmd": "npm test --silent"}
 {"ts": 400, "tool": "Bash", "sid": "s2", "cmd": "npm test"}
 {"ts": 500, "tool": "Grep", "sid": "s1", "pattern": "foo", "path": "src"}
+{"ts": 600, "tool": "Bash", "sid": "s2", "cmd": "cd /tmp && npm test"}
 not-json-garbage-line
 EOF
   run .claude/hooks/metrics-collector.sh --digest
   [ "$status" -eq 0 ]
-  [[ "$output" == *"5 entries, 2 sessions"* ]]
-  # npm test: 2회 실행, 서로 다른 세션 2개 / /p/src: Read 2회, 세션 2개
-  echo "$output" | grep -qE '^ +2 +2 +npm test$'
+  [[ "$output" == *"6 entries, 2 sessions"* ]]
+  # 게이트(awk, 비어 있지 않은 줄 수)와의 계수 차이가 보이도록 파싱 불가 줄 수를 보고한다
+  [[ "$output" == *"1 unparsable lines skipped"* ]]
+  # npm test: 체인 명령(cd /tmp && npm test)의 세그먼트 계수 포함 3회, 세션 2개
+  echo "$output" | grep -qE '^ +3 +2 +npm test$'
+  echo "$output" | grep -qE '^ +1 +1 +cd /tmp$'
   echo "$output" | grep -qE '^ +2 +2 +/p/src$'
   echo "$output" | grep -qE '^ +1 +1 +src$'
+}
+
+@test "metrics-collector.sh --digest ranks cross-session repetition above single-session hit counts" {
+  # 4회지만 한 세션뿐인 항목보다 2회·2세션 항목이 위에 와야 한다 —
+  # 세션 간 반복이 문서 갭의 핵심 증거라는 다이제스트의 존재 이유 그 자체.
+  cat > .cursor-context/metrics.jsonl <<'EOF'
+{"ts": 1, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 2, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 3, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 4, "tool": "Bash", "sid": "s1", "cmd": "make lint"}
+{"ts": 5, "tool": "Bash", "sid": "s1", "cmd": "make deploy-check"}
+{"ts": 6, "tool": "Bash", "sid": "s2", "cmd": "make deploy-check"}
+EOF
+  run .claude/hooks/metrics-collector.sh --digest
+  [ "$status" -eq 0 ]
+  first_row=$(echo "$output" | grep -E '^ +[0-9]+ +[0-9]+ +make' | head -1)
+  [[ "$first_row" == *"make deploy-check"* ]]
+}
+
+@test "metrics-collector.sh keeps a grep whose pattern mentions .cursor-context but targets real source" {
+  rm -f .cursor-context/metrics.jsonl
+  echo '{"tool_name":"Grep","tool_input":{"pattern":".cursor-context","path":"src/"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  grep -q '"path": "src/"' .cursor-context/metrics.jsonl
+}
+
+@test "metrics-collector.sh does not log invocations of the toolkit's own scripts" {
+  rm -f .cursor-context/metrics.jsonl
+  echo '{"tool_name":"Bash","tool_input":{"command":".claude/hooks/context-benchmark.sh doc.md"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  echo '{"tool_name":"Bash","tool_input":{"command":"bash .claude/hooks/metrics-collector.sh --digest"}}' > input.json
+  run .claude/hooks/metrics-collector.sh < input.json
+  [ "$status" -eq 0 ]
+  [ ! -f .cursor-context/metrics.jsonl ]
 }
 
 @test "metrics-collector.sh redacts credential-shaped values in logged Bash commands" {

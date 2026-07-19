@@ -49,14 +49,16 @@ config가 없거나 `LANG=ko`면 한국어로 작성한다.
 실시간 판단한다). 지문 블록은 반드시 지문 생성기 출력을 그대로 사용한다:
 
 ```bash
+HOOKS=.claude/hooks   # 플러그인 배치면 이 SKILL.md 기준 ../../hooks 의 실제 경로로 교체
 HEAD=$(git rev-parse HEAD)
-FP=$(<hooks>/context-fingerprint.sh)
+FP=$("$HOOKS"/context-fingerprint.sh)
 ```
 
-`<hooks>/`는 배치에 따라 해석한다: `.claude/hooks/`에 스크립트가 있으면
-그것을(install.sh 배치), 없으면 이 SKILL.md 기준 `../../hooks/`를(플러그인
+`$HOOKS` 경로 규칙: `.claude/hooks/`에 스크립트가 있으면 그대로(install.sh
+배치), 없으면 이 SKILL.md의 실제 위치 기준 `../../hooks`로 바꾼다(플러그인
 배치 — 두 배치 모두 skills/와 hooks/가 같은 루트의 형제라 이 상대 경로는
-항상 성립한다) 쓴다.
+항상 성립한다). 경로가 틀리면 "command not found"로 크게 실패하니, FP가
+비었는데 에러도 없었다면 명령을 그대로 복사만 한 것이 아닌지 의심하라.
 
 ```markdown
 <!-- generated-at-commit: (위 HEAD 값) -->
