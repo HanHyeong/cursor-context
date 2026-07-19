@@ -19,6 +19,15 @@ README가 영어 우선이므로) project-context.md **본문**을 한국어 대
 읽는 주체가 사람이 아니라 Claude이므로 언어와 무관하게 동일하게 이해한다.
 config가 없거나 `LANG=ko`면 한국어로 작성한다.
 
+## 훅 스크립트 위치 (`<hooks>/` 표기)
+
+이 스킬이 실행하는 훅 스크립트의 경로는 배치에 따라 다르다: install.sh
+배치는 프로젝트의 `.claude/hooks/`, 플러그인 배치는 이 SKILL.md 기준
+`../../hooks/`다 (두 배치 모두 `skills/<이름>/`과 `hooks/`가 같은 루트의
+형제 디렉터리라 상대 경로는 동일하다). 아래 절차의 `<hooks>/`는 이렇게
+해석한다: **`.claude/hooks/`에 해당 스크립트가 있으면 그것을 쓰고, 없으면
+이 스킬 디렉터리 기준 `../../hooks/`를 쓴다.**
+
 ## 절대 규칙 (진화의 경계)
 
 1. **수정 대상은 오직 `.cursor-context/project-context.md`와 자기 로그 파일뿐이다.**
@@ -66,9 +75,9 @@ cp .cursor-context/project-context.md .cursor-context/backup/evolve-<ts>/
 ### 4. 기준 점수 → 재작성 → 게이트
 
 ```bash
-.claude/hooks/context-benchmark.sh          # 기준 점수 기록 (PASS 수)
+<hooks>/context-benchmark.sh          # 기준 점수 기록 (PASS 수)
 # ... 문서 재작성 (project-onboard의 작성 원칙 준수, 마커 재기록 필수) ...
-.claude/hooks/context-benchmark.sh          # 새 문서 채점
+<hooks>/context-benchmark.sh          # 새 문서 채점
 ```
 
 **채택 조건: 새 문서의 FAIL=0 그리고 PASS 수 ≥ 기준 PASS 수.**

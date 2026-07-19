@@ -26,9 +26,14 @@ description: 자동 생성 컨텍스트 문서(.cursor-context/project-context.m
 수정을 마치면 문서 상단 마커를 반드시 다음으로 교체한다:
 
 ```bash
-HEAD=$(git rev-parse HEAD)                      # → generated-at-commit 값
-FP=$(.claude/hooks/context-fingerprint.sh)      # → 지문 블록 내용 (그대로 붙여넣기)
+HEAD=$(git rev-parse HEAD)                # → generated-at-commit 값
+FP=$(<hooks>/context-fingerprint.sh)      # → 지문 블록 내용 (그대로 붙여넣기)
 ```
+
+`<hooks>/`는 배치에 따라 해석한다: `.claude/hooks/`에 스크립트가 있으면
+그것을(install.sh 배치), 없으면 이 SKILL.md 기준 `../../hooks/`를(플러그인
+배치 — 두 배치 모두 skills/와 hooks/가 같은 루트의 형제라 이 상대 경로는
+항상 성립한다) 쓴다.
 
 지문 블록은 직접 계산하지 말고 반드시 생성기 출력을 사용한다.
 생성기 출력이 비어 있으면(종료 코드 3 — 해시 도구 없는 환경) 지문 블록을

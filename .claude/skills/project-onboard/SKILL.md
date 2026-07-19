@@ -50,8 +50,13 @@ config가 없거나 `LANG=ko`면 한국어로 작성한다.
 
 ```bash
 HEAD=$(git rev-parse HEAD)
-FP=$(.claude/hooks/context-fingerprint.sh)
+FP=$(<hooks>/context-fingerprint.sh)
 ```
+
+`<hooks>/`는 배치에 따라 해석한다: `.claude/hooks/`에 스크립트가 있으면
+그것을(install.sh 배치), 없으면 이 SKILL.md 기준 `../../hooks/`를(플러그인
+배치 — 두 배치 모두 skills/와 hooks/가 같은 루트의 형제라 이 상대 경로는
+항상 성립한다) 쓴다.
 
 ```markdown
 <!-- generated-at-commit: (위 HEAD 값) -->
