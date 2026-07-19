@@ -49,16 +49,20 @@ config가 없거나 `LANG=ko`면 한국어로 작성한다.
 실시간 판단한다). 지문 블록은 반드시 지문 생성기 출력을 그대로 사용한다:
 
 ```bash
-HOOKS=.claude/hooks   # 플러그인 배치면 이 SKILL.md 기준 ../../hooks 의 실제 경로로 교체
 HEAD=$(git rev-parse HEAD)
-FP=$("$HOOKS"/context-fingerprint.sh)
+FP=$(.claude/hooks/context-fingerprint.sh)
 ```
 
-`$HOOKS` 경로 규칙: `.claude/hooks/`에 스크립트가 있으면 그대로(install.sh
-배치), 없으면 이 SKILL.md의 실제 위치 기준 `../../hooks`로 바꾼다(플러그인
-배치 — 두 배치 모두 skills/와 hooks/가 같은 루트의 형제라 이 상대 경로는
-항상 성립한다). 경로가 틀리면 "command not found"로 크게 실패하니, FP가
-비었는데 에러도 없었다면 명령을 그대로 복사만 한 것이 아닌지 의심하라.
+**리터럴 경로를 유지한다 — 변수로 바꾸지 마라.** 이 프로젝트의
+`.claude/settings.json`은 `permissions.allow`에 `Bash(.claude/hooks/*)`
+규칙을 등록해 두어 이 명령이 승인 프롬프트 없이 실행되는데, 이 규칙은
+Bash 도구에 넘어가는 명령 텍스트를 문자 그대로 접두어 매칭한다(셸 변수
+확장을 이해하지 못함). `HOOKS=...; "$HOOKS"/...`처럼 바꾸면 텍스트가
+`.claude/hooks/`로 시작하지 않아 매칭이 깨지고 매번 프롬프트가 뜬다.
+install.sh 배치(대부분의 경우)에서는 위 명령을 그대로 실행한다. **그
+경로에 스크립트가 없다면**(플러그인 배치) 이 SKILL.md의 실제 위치 기준
+`../../hooks/context-fingerprint.sh`로 경로만 바꿔(변수 없이) 실행하라 —
+이 경우 허용 규칙이 적용되지 않아 권한 프롬프트가 뜰 수 있다(정상 동작).
 
 ```markdown
 <!-- generated-at-commit: (위 HEAD 값) -->
