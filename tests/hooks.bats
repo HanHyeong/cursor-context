@@ -474,6 +474,43 @@ COMMIT_BACKSTOP=2" > .cursor-context/config
   [[ "$output" == *'"permissionDecision": "allow"'* ]]
 }
 
+@test "permission-gate.sh allows the documented FP=\$(...) command-substitution pattern" {
+  # context-refresh/project-onboard SKILL.md의 유일한 실사용 패턴: 지문
+  # 출력을 변수에 담는다. 이걸 막으면 훅이 자기 존재 이유를 못 지킨다.
+  echo '{"tool_name":"Bash","tool_input":{"command":"FP=$(.claude/hooks/context-fingerprint.sh)"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"permissionDecision": "allow"'* ]]
+
+  echo '{"tool_name":"Bash","tool_input":{"command":"HEAD=$(git rev-parse HEAD)"}}' > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "permission-gate.sh rejects command-substitution attempts to smuggle a second command" {
+  for cmd in \
+    'FP=$(.claude/hooks/context-fingerprint.sh $(whoami))' \
+    'FP=$(.claude/hooks/context-fingerprint.sh; whoami)' \
+    'FP=$(.claude/hooks/context-benchmark.sh); rm -rf ~'
+  do
+    printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$cmd")" > input.json
+    run .claude/hooks/permission-gate.sh < input.json
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "permission-gate.sh does not treat vertical-tab/form-feed as a bash word separator (would misjudge a command bash actually glues into one failing token)" {
+  python3 -c "
+import json
+print(json.dumps({'tool_name':'Bash','tool_input':{'command':'.claude/hooks/context-benchmark.sh\x0bwhoami'}}))
+" > input.json
+  run .claude/hooks/permission-gate.sh < input.json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "permission-gate.sh allows the absolute HOOK_DIR-anchored form (plugin layout simulation)" {
   # 플러그인 배치를 흉내낸다: 훅이 .claude/hooks가 아닌 임의의 디렉터리에
   # 있고, 명령이 그 절대경로를 그대로 쓴다.

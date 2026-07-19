@@ -22,17 +22,28 @@
 #
 # 승인 대상은 반드시 다음을 모두 만족해야 한다:
 #   1) tool_name == "Bash"
-#   2) 명령 전체에 체이닝·치환·리다이렉션 등 셸 특수문자(; & | ` $ < > 개행)가
-#      전혀 없음 — "우리 스크립트 + 단순 인자"만 허용, 임의 명령 삽입 방지
-#   3) 명령의 첫 토큰이 이 훅 자신의 HOOK_DIR(install.sh 배치면
-#      .../.claude/hooks, 플러그인 배치면 그 플러그인의 실제 hooks 디렉터리)
-#      아래의 context-benchmark.sh / context-fingerprint.sh /
-#      metrics-collector.sh 중 하나와 정확히 일치(install.sh 배치에서는
-#      프로젝트 루트 상대경로 .claude/hooks/<script>도 동일하게 인정 —
-#      Bash 도구의 cwd가 프로젝트 루트이기 때문)
+#   2) 명령이 다음 두 형태 중 하나 — 그 외에는 절대 승인하지 않는다:
+#      a) "<스크립트> [단순 인자...]" — 셸 특수문자(; & | ` $ < > 개행)가
+#         전혀 없는 단독 호출
+#      b) "IDENT=$(<스크립트> [단순 인자...])" — 스킬이 지문 출력을 변수에
+#         담을 때 쓰는 유일한 패턴(project-onboard/context-refresh
+#         SKILL.md의 `FP=$(...)`). 바깥 $(...) 한 겹만 벗기고, 그 안쪽
+#         내용에 셸 특수문자가 있으면(중첩 치환 포함) 승인하지 않는다.
+#         (a)만 허용하면 이 문서화된 유일한 실사용 패턴이 매번 프롬프트를
+#         띄우게 되어 훅의 존재 이유가 무색해진다.
+#   3) 위에서 뽑아낸 스크립트 호출의 첫 토큰이 이 훅 자신의 HOOK_DIR
+#      (install.sh 배치면 .../.claude/hooks, 플러그인 배치면 그 플러그인의
+#      실제 hooks 디렉터리) 아래의 context-benchmark.sh /
+#      context-fingerprint.sh / metrics-collector.sh 중 하나와 정확히
+#      일치(install.sh 배치에서는 프로젝트 루트 상대경로
+#      .claude/hooks/<script>도 동일하게 인정 — Bash 도구의 cwd가 프로젝트
+#      루트이기 때문)
 #
 # 위 조건에 안 맞으면 아무 것도 출력하지 않고 exit 0 — 일반 권한 흐름으로
-# 그대로 넘어간다(fail-safe: 애매하면 승인하지 않는다).
+# 그대로 넘어간다(fail-safe: 애매하면 승인하지 않는다). 알려진 의도적 한계:
+# 스크립트 경로를 따옴표로 감싸면(예: `'...context-benchmark.sh'`) 첫 토큰
+# 비교가 실패해 승인되지 않는다 — 안전하지만 불필요한 프롬프트가 뜨는
+# 정도이며, 이 툴킷의 문서화된 명령 어디에도 이런 형태는 없다.
 
 set -u
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
@@ -57,12 +68,28 @@ cmd = str((d.get("tool_input") or {}).get("command", "")).strip()
 if not cmd:
     sys.exit(0)
 
-# 셸 특수문자가 하나라도 있으면 절대 승인하지 않는다(체이닝·치환·리다이렉션
-# 등으로 임의 명령을 함께 실어 보낼 수 있기 때문).
-if re.search(r'[;&|`$<>\n]', cmd):
+# 셸 특수문자 판정. \x0b(수직 탭)·\x0c(폼 피드)·\r도 포함한다 — 파이썬의
+# str.split()은 이들을 공백으로 취급해 첫 토큰 추출에 영향을 주지만 bash의
+# 기본 단어 분리(IFS)는 그렇지 않으므로, 포함하지 않으면 "안전하지만 실제로는
+# 실행에 실패하는" 명령을 잘못 승인할 수 있다.
+METACHARS = re.compile(r'[;&|`$<>\n\x0b\x0c\r]')
+
+def bare_head(s):
+    """특수문자 없는 단독 호출이면 첫 토큰을 반환, 아니면 None."""
+    if METACHARS.search(s):
+        return None
+    parts = s.split(None, 1)
+    return parts[0] if parts else None
+
+# 형태 (b): IDENT=$(<내용>) — 바깥 대입·치환 껍데기 자체는 특수문자 검사에서
+# 예외로 두고, 껍데기를 벗긴 안쪽 내용만 bare_head()로 다시 엄격히 검사한다.
+# 안쪽에 또 다른 특수문자(중첩 치환 등)가 있으면 bare_head()가 None을 반환해
+# 자동으로 거부된다 — 이중 우회 불가.
+m = re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=\$\((.+)\)', cmd)
+head = bare_head(m.group(1)) if m else bare_head(cmd)
+if head is None:
     sys.exit(0)
 
-head = cmd.split(None, 1)[0]
 hook_dir = os.environ.get("HOOK_DIR", "")
 scripts = ("context-benchmark.sh", "context-fingerprint.sh", "metrics-collector.sh")
 

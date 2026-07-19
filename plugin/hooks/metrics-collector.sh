@@ -172,7 +172,8 @@ else:
 # .claude/ 등 다른 경로는 거르지 않는다 — 그것이 실제 작업 대상인 프로젝트가 있다.
 TOOLKIT_SCRIPTS = ("context-fingerprint.sh", "context-benchmark.sh",
                    "metrics-collector.sh", "session-context.sh",
-                   "prompt-freshness.sh", "evolve-gate.sh", "lib-config.sh")
+                   "prompt-freshness.sh", "evolve-gate.sh",
+                   "permission-gate.sh", "lib-config.sh")
 cmd_s = rec.get("cmd", "")
 if ".cursor-context" in cmd_s or any(s in cmd_s for s in TOOLKIT_SCRIPTS):
     sys.exit(0)

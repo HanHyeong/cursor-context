@@ -154,7 +154,12 @@ declare a `permissions.allow` rule (there's no such field), but the
 `permission-gate.sh` PreToolUse hook works identically under either install
 method since hooks bypass permission checks regardless of how they're
 registered — so the plugin path gets the same prompt-free evolution loop as
-`install.sh`, just via mechanism (1) above instead of both (1) and (2).
+`install.sh`, just via mechanism (1) above instead of both (1) and (2). This
+relies on the skills resolving the plugin's actual absolute hooks path at
+runtime rather than typing a literal relative string — permission-gate.sh's
+exact-match check needs the real path, and the SKILL.md files instruct this
+explicitly (this part is model-followed instruction, not
+deterministically enforced the way the literal-vs-variable rule is).
 Both installation methods are maintained side by side for now; `install.sh`
 will be marked deprecated only after the plugin path has had a release or two
 to prove out.
