@@ -59,11 +59,23 @@ metrics는 반드시 `--digest` 요약으로 읽는다 — 원본(metrics.jsonl)
 
 - **feedback의 `wrong`** → 해당 서술을 실제 코드와 대조해 수정
 - **feedback의 `gap`** → 해당 주제가 문서에 있어야 하는지 판단 후 섹션 추가
-- **metrics의 반복 탐색**: 같은 디렉터리/주제에 대한 Read/Grep이 3회 이상인데
-  문서가 그 영역을 다루지 않으면 → 문서가 커버했어야 할 갭 후보
-- **metrics의 자주 실행된 명령**: 문서 명령어 표에 없는 고빈도 명령 → 추가 후보
-- **한 번도 참조되지 않은 문서 섹션**: 어떤 세션 신호와도 연결되지 않는
-  섹션은 삭제 후보 (200줄 예산 확보)
+- **다이제스트의 세션 간 반복**: 여러 세션(sessions ≥ 2)에서 반복된 디렉터리
+  탐색인데 문서가 그 영역을 다루지 않으면 → 커버했어야 할 갭 후보.
+  한 세션 안의 반복(hits는 높은데 sessions=1)은 그 작업 하나의 특성일 수
+  있으므로 증거로서 더 약하다.
+- **다이제스트의 자주 실행된 명령**: 문서 명령어 표에 없는 고빈도(특히 다중
+  세션) 명령 → 추가 후보
+- **재발 검사 (evolve-log 대조)**: `.cursor-context/evolve-log.jsonl`의 과거
+  항목을 읽는다. (a) 이전 진화가 고쳤다고 기록한 영역의 wrong/gap이 다시
+  쌓였으면 그 변이는 실패한 것이다 — 최우선으로 다시 다루고, 로그에 재발임을
+  명시한다. (b) 이전 진화가 삭제한 섹션의 영역이 gap으로 재발했으면 해당
+  섹션을 복원하고 이후 삭제 후보에서 제외한다.
+- **섹션 삭제 기준 — 신호 부재는 삭제 근거가 아니다**: metrics가 측정하는
+  것은 "문서에 없어서 탐색했다"는 갭이지 문서 사용이 아니다. 잘 작동하는
+  섹션일수록 탐색을 만들지 않아 신호가 0이다 — 침묵은 성공일 수 있다.
+  삭제는 (a) 실제 코드와 대조해 틀렸거나 낡은 서술, (b) CLAUDE.md와 중복된
+  내용에 한정한다. 200줄 예산 초과로 부득이 줄일 때만 그 외 섹션을 다이어트
+  하되, 위 (b)의 복원 대상은 건드리지 않는다.
 
 ### 3. 백업 — 반드시 재작성 전에
 
@@ -89,15 +101,20 @@ cp .cursor-context/project-context.md .cursor-context/backup/evolve-<ts>/
 
 ### 5. 신호 소진 및 기록
 
-채택 여부와 무관하게 처리한 신호는 소진시킨다 (안 하면 다음 세션마다
-진화가 재트리거되는 루프에 빠진다):
+**채택된 경우에만** 처리한 신호를 소진시킨다(백업으로 이동):
 
 ```bash
 mv .cursor-context/context-feedback.jsonl .cursor-context/backup/evolve-<ts>/ 2>/dev/null
 mv .cursor-context/metrics.jsonl .cursor-context/backup/evolve-<ts>/ 2>/dev/null
 ```
 
-그리고 `.cursor-context/evolve-log.jsonl`에 결과 한 줄을 추가한다:
+**기각된 경우 신호 파일은 그대로 둔다.** 문서가 개선되지 않았는데 그 개선을
+요구했던 증거를 버리면 같은 갭이 근거 없이 남는다. 재트리거 루프는 걱정할
+필요 없다 — 같은 세션의 재차단은 evolve-gate의 세션 단위 sentinel이 막고,
+새 세션에서의 재시도는 의도된 동작이다(지속 기각은 숨길 문제가 아니라
+드러나야 할 문제다).
+
+그리고 채택 여부와 무관하게 `.cursor-context/evolve-log.jsonl`에 결과 한 줄을 추가한다:
 
 ```json
 {"ts":..., "accepted":true|false, "before_pass":N, "after_pass":M, "changes":"한 줄 요약", "reject_reason":null|"..."}

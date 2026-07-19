@@ -213,12 +213,22 @@ measure → reflect → mutate → select loop:
   (`evolve-gate.sh`) blocks the turn from ending until `/context-evolve`
   runs after your request — injected "do it later" instructions proved
   only probabilistic in testing, so enforcement lives in the harness, not
-  in model compliance. Evolution fixes what was wrong, adds what was
-  repeatedly explored, and **deletes sections no session ever used**
-  (the 200-line budget forces selection, not growth). The gate blocks at
-  most once per threshold crossing when evolution actually runs (the
-  signal files are consumed, so the condition clears itself); if a session
-  skips evolution instead (plan mode, read-only), a per-session sentinel
+  in model compliance. Analysis starts from a deterministic digest
+  (`metrics-collector.sh --digest`: hit counts plus distinct-session
+  tallies per command/directory), not the raw log — cross-session
+  recurrence is the evidence that matters, and pure-code counting is exact.
+  Evolution fixes what was wrong, adds what multiple sessions had to
+  re-explore, and checks `evolve-log` for recurrence: an area a past
+  evolution claimed to fix showing up again gets re-prioritized and
+  flagged. Deletion is deliberately conservative — only claims proven
+  wrong/stale or content duplicating CLAUDE.md. Absence of usage signal is
+  **not** a deletion reason: metrics measure gaps, not usage, so a section
+  that works produces no exploration — silence can mean success (the
+  200-line budget still forces selection, not growth). The gate blocks at
+  most once per threshold crossing when an evolution is **adopted**
+  (adoption consumes the signal files, so the condition clears itself); a
+  rejected rewrite keeps the signal files as evidence. In that case — as
+  when a session skips evolution (plan mode, read-only) — a per-session sentinel
   (`.cursor-context/.gate-fired-<session_id>`) still caps it at once **per
   session** so it doesn't re-fire on every subsequent turn — a fresh
   session gets one fresh block. The gate never blocks read-only sessions'

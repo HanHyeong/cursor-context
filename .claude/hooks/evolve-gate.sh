@@ -9,14 +9,16 @@
 #
 # 루프 안전성 (삼중 방어):
 #   1) stop_hook_active=true(이미 이 게이트로 재개된 턴의 종료)면 무조건 통과
-#   2) 진화가 실행되면 스킬 절차상 신호 파일이 소진되므로 임계 조건 자체가
-#      해제된다 — 즉 차단은 임계값 교차당 최대 1회다.
+#   2) 진화가 실행되어 **채택되면** 스킬 절차상 신호 파일이 소진되므로 임계
+#      조건 자체가 해제된다. 기각되면 신호는 보존된다(증거 유지) — 그 경우의
+#      재차단은 (3)의 sentinel이 세션당 1회로 제한하고, 새 세션에서의
+#      재시도는 의도된 동작이다.
 #   3) 세션 단위 sentinel(.cursor-context/.gate-fired-<session_id>): 진화를
-#      건너뛴 세션(plan 모드, 읽기 전용 등)에서는 (2)의 신호 소진이 일어나지
-#      않아 다음 턴의 첫 Stop마다 다시 차단될 수 있었다. sentinel이 있으면
-#      같은 세션 안에서는 무조건 통과시켜 "세션당 최대 1회"를 보장한다.
-#      새 세션에서는 SessionStart 훅(session-context.sh)이 오래된 sentinel을
-#      정리하므로 다시 1회 차단된다.
+#      건너뛰었거나(plan 모드, 읽기 전용 등) 기각된 세션에서는 (2)의 신호
+#      소진이 일어나지 않아 다음 턴의 첫 Stop마다 다시 차단될 수 있었다.
+#      sentinel이 있으면 같은 세션 안에서는 무조건 통과시켜 "세션당 최대
+#      1회"를 보장한다. 새 세션에서는 SessionStart 훅(session-context.sh)이
+#      오래된 sentinel을 정리하므로 다시 1회 차단된다.
 # python3가 없으면 차단하지 않는다 (루프 가드 불가 시 강제도 하지 않는 fail-safe).
 
 set -u
@@ -39,8 +41,8 @@ CTX_LANG=en
 # shellcheck disable=SC1091
 . "$HOOK_DIR/lib-config.sh" 2>/dev/null || true
 
-MSG_en_block="Accumulated usage signal (feedback: %s entries, metrics: %s lines) crossed the threshold. Follow the context-evolve skill procedure now to improve .cursor-context/project-context.md: backup -> analyze signals -> rewrite -> context-benchmark.sh gate -> consume signal files (move to backup) -> record in evolve-log. Never modify CLAUDE.md, hooks, skills, or settings. If writing is impossible or inappropriate in this session (plan mode, read-only), do nothing and just let the turn end."
-MSG_ko_block="축적된 사용 신호(피드백 %s건, 메트릭 %s건)가 임계값을 넘었습니다. 지금 context-evolve 스킬 절차에 따라 .cursor-context/project-context.md 를 개선하세요: 백업 → 신호 분석 → 재작성 → context-benchmark.sh 게이트 → 신호 파일 소진(백업으로 이동) → evolve-log 기록. CLAUDE.md·훅·스킬·설정은 절대 수정하지 마세요. 단, 이 세션에서 파일 쓰기가 불가능하거나 부적절하면(plan 모드, 읽기 전용) 아무것도 하지 말고 그대로 종료하세요."
+MSG_en_block="Accumulated usage signal (feedback: %s entries, metrics: %s lines) crossed the threshold. Follow the context-evolve skill procedure now to improve .cursor-context/project-context.md: backup -> analyze signals (metrics via --digest) -> rewrite -> context-benchmark.sh gate -> consume signal files only on adoption (keep them on rejection) -> record in evolve-log. Never modify CLAUDE.md, hooks, skills, or settings. If writing is impossible or inappropriate in this session (plan mode, read-only), do nothing and just let the turn end."
+MSG_ko_block="축적된 사용 신호(피드백 %s건, 메트릭 %s건)가 임계값을 넘었습니다. 지금 context-evolve 스킬 절차에 따라 .cursor-context/project-context.md 를 개선하세요: 백업 → 신호 분석(메트릭은 --digest 요약으로) → 재작성 → context-benchmark.sh 게이트 → 채택 시에만 신호 파일 소진(기각 시 보존) → evolve-log 기록. CLAUDE.md·훅·스킬·설정은 절대 수정하지 마세요. 단, 이 세션에서 파일 쓰기가 불가능하거나 부적절하면(plan 모드, 읽기 전용) 아무것도 하지 말고 그대로 종료하세요."
 
 # ${!varname} 간접 참조로 언어별 메시지를 고른다 (bash 3.2도 지원 — macOS 기본 bash 호환).
 msg() {
